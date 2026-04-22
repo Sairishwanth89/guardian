@@ -1,0 +1,30 @@
+# GUARDIAN Fleet — Server Docker Requirements
+# ===========================================
+# These are the INFERENCE/DEMO dependencies only.
+# Heavy training deps (torch, unsloth, trl, peft) are excluded from the
+# Docker image to keep it lean. Install those separately for training.
+
+# ── Server framework ─────────────────────────────────────────────────────────
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+websockets>=11.0
+
+# ── Data models ──────────────────────────────────────────────────────────────
+pydantic>=2.0
+
+# ── Environment runtime ───────────────────────────────────────────────────────
+gymnasium>=0.29.0
+numpy>=1.24.0
+
+# ── Worker agents (Finance/Ops/HR call OpenAI API) ────────────────────────────
+openai>=1.0.0
+python-dotenv>=1.0.0
+
+# ── Dashboard ────────────────────────────────────────────────────────────────
+gradio>=4.0.0
+
+# ── HTTP client (for client.py http_reset / http_step fallback) ──────────────
+httpx>=0.24.0
+
+# ── OpenEnv core (optional — provides EnvClient base class) ──────────────────
+openenv-core>=0.1.1

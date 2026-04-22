@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "guardian-env"
+version = "0.2.0"
+description = "GUARDIAN Fleet — AI Security Oversight RL Environment for OpenEnv"
+authors = [{ name = "GUARDIAN Team" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.10"
+
+# Core runtime dependencies (no heavy ML training deps)
+dependencies = [
+    "gymnasium>=0.29.0",
+    "numpy>=1.24.0",
+    "pydantic>=2.0",
+    "python-dotenv>=1.0.0",
+    "openai>=1.0.0",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "websockets>=11.0",
+    "httpx>=0.24.0",
+]
+
+[project.optional-dependencies]
+# For GRPO training (install on Kaggle/Colab separately)
+train = [
+    "datasets>=2.14.0",
+    "trl>=0.8.6",
+    "peft>=0.7.0",
+    "torch>=2.0.0",
+]
+# For the Gradio SOC theater dashboard
+dashboard = [
+    "gradio>=4.0.0",
+]
+# For openenv-core EnvClient base class
+openenv = [
+    "openenv-core>=0.1.1",
+]
+# Everything (used in CI, not Docker)
+all = [
+    "datasets>=2.14.0",
+    "trl>=0.8.6",
+    "peft>=0.7.0",
+    "torch>=2.0.0",
+    "gradio>=4.0.0",
+    "openenv-core>=0.1.1",
+    "faiss-cpu",
+    "scikit-learn",
+]
+
+[project.scripts]
+# Start the OpenEnv FastAPI server
+guardian-server = "server.app:main"
+# Run GRPO training
+guardian-train  = "guardian.training.train_grpo:main"
+# Run evaluation harness
+guardian-eval   = "guardian.training.evaluation:main"
+# Launch Gradio SOC dashboard
+guardian-dashboard = "guardian.dashboard.app:main"
+
+[tool.setuptools.packages.find]
+# Discover both the inner guardian/ package and the new server/ package
+where = ["."]
+include = ["guardian*", "server*"]
+exclude = ["outputs*", "*.egg-info*"]
+
+[tool.setuptools.package-data]
+# Include YAML, Markdown, and JSON config files
+"*" = ["*.yaml", "*.yml", "*.md", "*.json"]

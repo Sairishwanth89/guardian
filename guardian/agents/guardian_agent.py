@@ -92,6 +92,7 @@ class GuardianAgent:
         faiss_context: Optional[str] = None,
         schema_version: int = 0,
         risk_history: Optional[List[float]] = None,
+        temperature: float = 0.1,
     ) -> Dict[str, Any]:
         if self.model is None:
             self.load_model()
@@ -107,8 +108,8 @@ class GuardianAgent:
             outputs = self.model.generate(
                 **inputs,
                 max_new_tokens=200,
-                temperature=0.1,
-                do_sample=False,
+                temperature=temperature,
+                do_sample=(temperature > 0.05),
                 pad_token_id=self.tokenizer.eos_token_id,
             )
         text = self.tokenizer.decode(
@@ -116,6 +117,89 @@ class GuardianAgent:
             skip_special_tokens=True,
         ).strip()
         return self._parse(text)
+
+    # ── Self-Distilled RLVR sampling ─────────────────────────────────────────
+
+    def sample_n_completions(
+        self,
+        action_log: List[Dict],
+        n: int = 8,
+        temperature: float = 0.9,
+        faiss_context: Optional[str] = None,
+        schema_version: int = 0,
+        risk_history: Optional[List[float]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Sample N diverse Guardian decisions at high temperature for Self-Distilled RLVR.
+
+        The sampler explores a wide intervention space; the best verified trajectory
+        is selected and added to the Golden Replay Buffer.
+
+        Returns:
+            List of N dicts with keys:
+              risk_score, intervention, classified_attack, reasoning,
+              explanation, parsed_correctly, _raw_completion
+        """
+        if self.model is None or self.tokenizer is None:
+            # Fallback (no GPU): N independent greedy calls
+            results = []
+            for _ in range(n):
+                d = self.evaluate(
+                    action_log,
+                    faiss_context=faiss_context,
+                    schema_version=schema_version,
+                    risk_history=risk_history,
+                    temperature=temperature,
+                )
+                d["_raw_completion"] = d.get("reasoning", "")
+                results.append(d)
+            return results
+
+        prompt = self.build_training_prompt(
+            action_log,
+            faiss_context=faiss_context,
+            schema_version=schema_version,
+            risk_history=risk_history,
+        )
+        return self._generate_n_with_model(prompt, n=n, temperature=temperature)
+
+    def _generate_n_with_model(
+        self,
+        prompt: str,
+        n: int,
+        temperature: float = 0.9,
+    ) -> List[Dict[str, Any]]:
+        """
+        Batch-generate N completions from one prompt in a single forward pass.
+        Expands the batch dimension manually to avoid num_return_sequences issues.
+        """
+        import torch
+        enc = self.tokenizer(
+            prompt, return_tensors="pt", truncation=True, max_length=1024
+        )
+        input_ids = enc["input_ids"].to(self.model.device).repeat(n, 1)
+        attention_mask = enc["attention_mask"].to(self.model.device).repeat(n, 1)
+        in_len = enc["input_ids"].shape[1]
+
+        with torch.no_grad():
+            outputs = self.model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=200,
+                temperature=temperature,
+                do_sample=True,
+                pad_token_id=self.tokenizer.eos_token_id,
+            )
+
+        results = []
+        for i in range(n):
+            text = self.tokenizer.decode(
+                outputs[i][in_len:], skip_special_tokens=True
+            ).strip()
+            parsed = self._parse(text)
+            parsed["_raw_completion"] = text
+            results.append(parsed)
+        return results
 
     def _parse(self, text: str) -> Dict[str, Any]:
         """Parse structured XML output format."""

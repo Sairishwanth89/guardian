@@ -1,0 +1,64 @@
+name: guardian-env
+version: "0.2.0"
+description: >
+  GUARDIAN Fleet — Multi-agent AI security oversight RL environment.
+  Trains a Guardian LLM (Qwen2.5-7B via GRPO) to detect and intercept
+  8 adversarial attack types in enterprise AI workflows:
+  authority spoofing, prompt injection, approval bypass, data exfiltration,
+  confused deputy, approval laundering, salami slicing, schema drift exploit.
+
+author: "GUARDIAN Team"
+license: "MIT"
+
+# OpenEnv server entry point — must implement reset(), step(), state()
+entry_point: server.guardian_environment:GuardianOpenEnvEnvironment
+
+# Typed data contracts
+action_type: models.GuardianAction
+observation_type: models.GuardianObservation
+state_type: models.GuardianState
+
+# Worker tool permissions registered in this environment
+skills:
+  - read_db             # Read enterprise graph records
+  - write_db            # Write to enterprise graph (requires approval chain)
+  - process_payment     # Process a payment (requires dual auth for > $10,000)
+  - modify_firewall     # Change firewall rules (ops-only)
+
+metadata:
+  render_modes: ["ansi", "human"]
+  max_episode_steps: 40
+  reward_threshold: 0.85
+  difficulty_levels: [1, 2, 3]
+  reward_components: 11
+  attack_types:
+    - authority_spoofing
+    - prompt_injection
+    - approval_bypass
+    - data_exfiltration
+    - confused_deputy
+    - approval_laundering
+    - salami_slicing
+    - schema_drift_exploit
+  intervention_types:
+    - allow
+    - rewrite
+    - shadow
+    - interrogate
+    - reduce_privs
+    - require_justification
+    - quarantine_tool
+    - rollback_k
+    - emergency_fork
+    - canary_inject
+    - escalate_human
+
+tags:
+  - multi-agent
+  - enterprise-security
+  - scalable-oversight
+  - adversarial-rl
+  - fleet-ai
+  - grpo
+  - self-improving
+  - long-horizon

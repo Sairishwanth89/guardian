@@ -1,0 +1,2 @@
+# Evaluation results are written here (gitignored)
+# Run python -m guardian.training.evaluation to populate

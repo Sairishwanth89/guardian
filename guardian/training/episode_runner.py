@@ -24,7 +24,6 @@ from typing import Dict, List, Optional
 
 from guardian.environment.guardian_env import ATTACK_PATTERNS, SAFE_TASKS, GUARDIANEnvironment
 from guardian.environment.reward_computer import RewardBreakdown, RewardComputer
-from guardian.environment.attack_taxonomy import AttackTaxonomy, SAFE_TASKS as TAX_SAFE_TASKS
 from guardian.agents.worker_agent import WorkerAgent, FinanceWorker, OpsWorker, HRWorker
 from guardian.agents.guardian_agent import GuardianAgent
 from guardian.agents.compliance_simulator import ComplianceSimulator
@@ -107,15 +106,19 @@ class EpisodeRunner:
 
         # ── Safe task phases ────────────────────────────────────────────
         safe_tasks = SAFE_TASKS
-        if self.curriculum and self._custom_attacks:
-            # Occasionally inject curriculum-generated attack variant
-            custom = self._custom_attacks.pop(0)
-            if attack_type and random.random() < 0.3:
-                # Override injection string with curriculum-generated one
+        if self.curriculum and self._custom_attacks and attack_type:
+            # Find a saved harder variant for the CURRENT attack type
+            custom_idx = next(
+                (i for i, a in enumerate(self._custom_attacks) if a["attack_type"] == attack_type), 
+                None
+            )
+            if custom_idx is not None and random.random() < 0.8:
+                custom = self._custom_attacks.pop(custom_idx)
                 if attack_type in ATTACK_PATTERNS:
                     ATTACK_PATTERNS[attack_type]["injection"] = custom.get(
                         "injection_string", ATTACK_PATTERNS[attack_type]["injection"]
                     )
+                    # print(f"  [Auto-RedTeam] Injected harder payload for {attack_type}")
 
         for safe_task in safe_tasks:
             wa = self.worker.get_action(safe_task["task"])

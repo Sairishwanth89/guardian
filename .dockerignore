@@ -1,0 +1,53 @@
+# GUARDIAN Fleet — Docker Build Exclusions
+# ==========================================
+# These paths are excluded from `docker build` context to keep the image lean.
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Python bytecode
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Jupyter notebooks (large, not needed in Docker)
+*.ipynb
+**/.ipynb_checkpoints/
+
+# Heavy model checkpoints (trained separately on Kaggle)
+guardian/checkpoints/
+
+# Runtime outputs (regenerated at runtime)
+outputs/
+
+# Training data logs (regenerated at runtime)
+guardian/data/*.jsonl
+guardian/data/*.json
+
+# Environment secrets
+.env
+.env.*
+
+# IDE / editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local virtualenvs
+.venv/
+venv/
+env/

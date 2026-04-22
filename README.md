@@ -1,3 +1,12 @@
+---
+title: GUARDIAN Fleet
+emoji: 🛡️
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+---
+
 # 🛡️ GUARDIAN Fleet — OpenEnv Hackathon Submission
 
 **Multi-agent AI security oversight environment trained via GRPO**

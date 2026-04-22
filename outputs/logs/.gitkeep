@@ -1,0 +1,2 @@
+# Runtime logs are written here (gitignored)
+# guardian/data/training_log.jsonl is symlinked or copied here by train_grpo.py
