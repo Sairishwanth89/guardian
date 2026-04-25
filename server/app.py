@@ -57,6 +57,14 @@ import uvicorn
 from models import GuardianAction, GuardianObservation, GuardianState, StepResult
 from server.guardian_environment import GuardianOpenEnvEnvironment
 
+try:
+    from guardian.hitl.escalation import hitl_manager, get_counterfactual, AMBIGUITY_LOW, AMBIGUITY_HIGH
+    _HITL_AVAILABLE = True
+except ImportError:
+    _HITL_AVAILABLE = False
+    log = logging.getLogger("guardian.server")
+    logging.getLogger("guardian.server").warning("HITL module not available — HITL endpoints disabled")
+
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -300,6 +308,143 @@ def get_tools() -> Dict[str, Any]:
 
 
 
+# ── HITL: Pending escalations ─────────────────────────────────────────────────
+
+@app.get(
+    "/hitl/pending",
+    summary="List all pending HITL escalations",
+    tags=["HITL"],
+)
+def hitl_pending() -> Dict[str, Any]:
+    """
+    Returns all pending human-in-the-loop escalations.
+    Each entry includes the pre-formatted WhatsApp decision matrix message.
+    """
+    if not _HITL_AVAILABLE:
+        return {"error": "HITL module not available", "pending": {}}
+    return {
+        "pending": hitl_manager.get_all_pending(),
+        "ambiguity_zone": {"low": AMBIGUITY_LOW, "high": AMBIGUITY_HIGH},
+    }
+
+
+@app.post(
+    "/hitl/decision",
+    summary="Submit human HITL decision",
+    tags=["HITL"],
+)
+def hitl_decision(body: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Submit a human decision for a pending HITL escalation.
+
+    Body:
+        {"context_id": "abc123", "decision": "allow" | "block" | "shadow"}
+
+    The decision is:
+      1. Executed by the MCP Gateway (allow/block/shadow routing)
+      2. Logged to the HITL Replay Buffer (hitl_replay.jsonl)
+      3. The replay buffer is used by the next GRPO training run as Ground Truth
+    """
+    if not _HITL_AVAILABLE:
+        return {"error": "HITL module not available"}
+
+    context_id = body.get("context_id", "")
+    decision = body.get("decision", "")
+
+    if decision not in ("allow", "block", "shadow"):
+        return {"error": f"Invalid decision '{decision}'. Must be: allow | block | shadow"}
+
+    ctx = hitl_manager.resolve_escalation(context_id, decision)  # type: ignore
+    if ctx is None:
+        return {"error": f"Unknown or already-resolved context_id '{context_id}'"}
+
+    stats = hitl_manager.get_replay_buffer_stats()
+    log.info(
+        "[HITL] Human decision: context_id=%s decision=%s replay_total=%d",
+        context_id, decision, stats["total_entries"]
+    )
+    return {
+        "resolved": True,
+        "context_id": context_id,
+        "decision": decision,
+        "tool_name": ctx.tool_name,
+        "replay_buffer_total": stats["total_entries"],
+        "message": (
+            f"Decision '{decision}' logged. "
+            f"Replay buffer now has {stats['total_entries']} ground-truth entries "
+            f"for next GRPO training run."
+        ),
+    }
+
+
+@app.get(
+    "/hitl/replay_stats",
+    summary="HITL replay buffer statistics",
+    tags=["HITL"],
+)
+def hitl_replay_stats() -> Dict[str, Any]:
+    """
+    Returns statistics about the HITL replay buffer.
+    Shows how many human decisions have been logged for the next GRPO training run.
+    """
+    if not _HITL_AVAILABLE:
+        return {"error": "HITL module not available"}
+    return hitl_manager.get_replay_buffer_stats()
+
+
+@app.post(
+    "/hitl/backtrack",
+    summary="Root-cause backtrack analysis for a BLOCK decision",
+    tags=["HITL"],
+)
+def hitl_backtrack(body: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Produces a full causal chain trace for a BLOCK decision.
+
+    Traces backward from the blocked action to:
+      - The first anomaly step (when risk deviated from baseline)
+      - The likely injection point (where malicious instruction entered)
+      - The full step-by-step causal chain
+      - A plain-English incident narrative
+      - Recommended post-incident actions
+
+    Body:
+        {
+            "context_id": "abc123",
+            "blocked_tool": "override_margin_limits",
+            "blocked_at_step": 8,
+            "risk_score": 0.82,
+            "capability_tags": "[STATE_MOD=True|PRIV_ESC=True|FINANCIAL=Critical]",
+            "attack_pattern": "confused_deputy",
+            "counterfactual": "Margin reqs zeroed...",
+            "domain": "finops",
+            "risk_history": [0.1, 0.12, 0.15, 0.35, 0.60, 0.75, 0.80, 0.82],
+            "intercept_log": [...]
+        }
+    """
+    if not _HITL_AVAILABLE:
+        return {"error": "HITL module not available"}
+
+    try:
+        from guardian.hitl.backtrack import backtrack_engine
+    except ImportError:
+        return {"error": "Backtrack engine not available"}
+
+    report = backtrack_engine.analyze(
+        context_id=body.get("context_id", "manual"),
+        blocked_tool=body.get("blocked_tool", "unknown"),
+        blocked_at_step=body.get("blocked_at_step", 0),
+        risk_score=body.get("risk_score", 0.0),
+        capability_tags=body.get("capability_tags", ""),
+        attack_pattern=body.get("attack_pattern", "unknown"),
+        counterfactual=body.get("counterfactual", ""),
+        domain=body.get("domain", "enterprise"),
+        intercept_log=body.get("intercept_log", []),
+        risk_history=body.get("risk_history", []),
+    )
+    return report.to_dict()
+
+
 # ── WebSocket endpoint ────────────────────────────────────────────────────────
 
 @app.websocket("/ws")
@@ -446,143 +591,213 @@ def web_interface() -> HTMLResponse:
     return HTMLResponse(content=_WEB_UI_HTML)
 
 
-_WEB_UI_HTML = """<!DOCTYPE html>
+_WEB_UI_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GUARDIAN Fleet — SOC War Room</title>
   <style>
-    /* Modern Dashboard Styling */
     *{box-sizing:border-box;margin:0;padding:0}
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
     body {
-        font-family: 'Inter', -apple-system, system-ui, sans-serif;
-        background: radial-gradient(circle at top, #111827, #030712);
-        color: #f3f4f6; min-height: 100vh; padding: 20px;
+      font-family: 'Inter', -apple-system, system-ui, sans-serif;
+      background: radial-gradient(ellipse at top, #0d1117 0%, #030712 100%);
+      color: #f3f4f6; min-height: 100vh; padding: 20px;
     }
-    
-    /* Header Area */
     .header {
-        display: flex; justify-content: space-between; align-items: center;
-        margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #1f2937;
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #1f2937;
     }
-    .header h1 { font-size: 1.5rem; font-weight: 700; color: #60a5fa; letter-spacing: -0.02em; }
-    .header .subtitle { font-size: 0.85rem; color: #9ca3af; margin-top: 4px; font-family: monospace; }
-    
-    /* Domain Selector Flex (Zero-Shot Demo) */
+    .header h1 { font-size: 1.4rem; font-weight: 700; color: #60a5fa; letter-spacing: -0.02em; }
+    .header .subtitle { font-size: 0.78rem; color: #6b7280; margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
     .domain-selector {
-        background: #1f2937; padding: 8px 16px; border-radius: 8px;
-        display: flex; align-items: center; gap: 12px; border: 1px solid #374151;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+      background: #1f2937; padding: 8px 14px; border-radius: 8px;
+      display: flex; align-items: center; gap: 10px; border: 1px solid #374151;
     }
-    .domain-selector label { font-size: 0.75rem; font-weight: 600; color: #9ca3af; text-transform: uppercase; }
+    .domain-selector label { font-size: 0.7rem; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing:.05em; }
     .domain-selector select {
-        background: #111827; color: #60a5fa; border: 1px solid #374151; font-weight: 600;
-        padding: 6px 12px; border-radius: 6px; outline: none; cursor: pointer; transition: all 0.2s;
+      background: #111827; color: #60a5fa; border: 1px solid #374151;
+      padding: 5px 10px; border-radius: 6px; outline: none; cursor: pointer;
+      font-size:0.82rem; font-weight: 600; transition: border-color 0.2s;
     }
     .domain-selector select:hover { border-color: #60a5fa; }
-    
-    /* Stats & Health Badges */
-    .status-bar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .status-bar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
     .badge {
-        display: flex; align-items: center; padding: 6px 12px; border-radius: 6px;
-        font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+      display: flex; align-items: center; padding: 5px 11px; border-radius: 6px;
+      font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; gap: 5px;
     }
-    .badge-ok { background: rgba(16, 185, 129, 0.1); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.2); }
-    .badge-warn { background: rgba(245, 158, 11, 0.1); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.2); }
-    .badge-bad { background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2); }
-    .badge-info { background: rgba(59, 130, 246, 0.1); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.2); }
-    
-    /* Control Panel */
+    .badge-ok   { background: rgba(16,185,129,.1);  color: #34d399; border: 1px solid rgba(16,185,129,.2); }
+    .badge-warn { background: rgba(245,158,11,.1);  color: #fbbf24; border: 1px solid rgba(245,158,11,.2); }
+    .badge-bad  { background: rgba(239,68,68,.1);   color: #f87171; border: 1px solid rgba(239,68,68,.2); }
+    .badge-info { background: rgba(59,130,246,.1);  color: #60a5fa; border: 1px solid rgba(59,130,246,.2); }
+    .badge-purple{ background: rgba(139,92,246,.1); color: #a78bfa; border: 1px solid rgba(139,92,246,.2); }
     .controls {
-        display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px;
-        background: #111827; padding: 16px; border-radius: 8px; border: 1px solid #1f2937;
+      display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 18px;
+      background: #111827; padding: 14px; border-radius: 8px; border: 1px solid #1f2937;
     }
-    .control-group { display: flex; flex-direction: column; gap: 6px; }
-    .control-group label { font-size: 0.75rem; color: #9ca3af; font-weight: 500; }
+    .control-group { display: flex; flex-direction: column; gap: 5px; }
+    .control-group label { font-size: 0.7rem; color: #9ca3af; font-weight: 600; text-transform:uppercase; letter-spacing:.04em; }
     select, input[type=range] {
-        background: #1f2937; color: #f3f4f6; border: 1px solid #374151;
-        padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; outline: none;
+      background: #1f2937; color: #f3f4f6; border: 1px solid #374151;
+      padding: 7px 11px; border-radius: 6px; font-size: 0.82rem; outline: none;
     }
-    input[type=range] { padding: 0; accent-color: #3b82f6; height: 6px; margin-top: 8px; }
+    input[type=range] { padding: 0; accent-color: #3b82f6; height: 5px; margin-top: 9px; }
     .btn {
-        padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer;
-        font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 6px; transition: all 0.2s;
+      padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer;
+      font-size: 0.82rem; font-weight: 700; display: flex; align-items: center;
+      gap: 5px; transition: all 0.15s; letter-spacing:.02em;
     }
-    .btn-step { background: #2563eb; color: #fff; } .btn-step:hover { background: #3b82f6; }
-    .btn-reset { background: #374151; color: #f3f4f6; } .btn-reset:hover { background: #4b5563; }
-    .btn-clear { background: rgba(239, 68, 68, 0.2); color: #f87171; } .btn-clear:hover { background: rgba(239, 68, 68, 0.4); }
-    
-    /* Layout Grid */
-    .grid { display: grid; grid-template-columns: 3fr 1.5fr; gap: 20px; }
+    .btn-step   { background: #2563eb; color: #fff; } .btn-step:hover   { background: #3b82f6; transform:translateY(-1px); }
+    .btn-reset  { background: #374151; color: #f3f4f6; } .btn-reset:hover  { background: #4b5563; }
+    .btn-clear  { background: rgba(239,68,68,.15); color: #f87171; } .btn-clear:hover { background: rgba(239,68,68,.3); }
+    .btn-allow  { background: rgba(16,185,129,.2); color: #34d399; border:1px solid rgba(16,185,129,.3); }
+    .btn-allow:hover  { background: rgba(16,185,129,.4); }
+    .btn-block  { background: rgba(239,68,68,.2); color: #f87171; border:1px solid rgba(239,68,68,.3); }
+    .btn-block:hover  { background: rgba(239,68,68,.4); }
+    .btn-shadow { background: rgba(245,158,11,.2); color: #fbbf24; border:1px solid rgba(245,158,11,.3); }
+    .btn-shadow:hover { background: rgba(245,158,11,.4); }
+    .grid { display: grid; grid-template-columns: 3fr 1.5fr; gap: 18px; }
     .panel {
-        background: #111827; border: 1px solid #1f2937; border-radius: 12px;
-        padding: 16px; display: flex; flex-direction: column; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.2);
+      background: #0d1117; border: 1px solid #1f2937; border-radius: 12px;
+      padding: 14px; display: flex; flex-direction: column;
+      box-shadow: 0 4px 12px rgba(0,0,0,.3);
     }
     .panel-header {
-        font-size: 0.85rem; font-weight: 600; color: #9ca3af; text-transform: uppercase;
-        letter-spacing: 0.05em; border-bottom: 1px solid #1f2937; padding-bottom: 12px; margin-bottom: 12px;
-        display: flex; justify-content: space-between;
+      font-size: 0.78rem; font-weight: 700; color: #9ca3af; text-transform: uppercase;
+      letter-spacing: 0.06em; border-bottom: 1px solid #1f2937;
+      padding-bottom: 10px; margin-bottom: 10px;
+      display: flex; justify-content: space-between; align-items: center;
     }
-    
-    /* Multi-App Attack Feed */
-    .event-feed { max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+    .event-feed { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; padding-right: 4px; }
     .event-card {
-        background: #1f2937; border: 1px solid #374151; border-left: 4px solid #3b82f6;
-        padding: 12px; border-radius: 6px; font-family: monospace; font-size: 0.75rem;
-        display: flex; flex-direction: column; gap: 8px;
+      background: #161b22; border: 1px solid #30363d; border-left: 3px solid #3b82f6;
+      padding: 10px; border-radius: 6px;
+      font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;
     }
-    .event-card.attack { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.05); }
-    .event-card.honeypot { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.05); }
-    
-    /* JSON Display */
-    pre { font-family: 'Cascadia Code', Consolas, monospace; font-size: 0.75rem; overflow-x: auto; color: #a5b4fc; }
-    .mcp-json p { margin:0; padding:0; }
-    .json-key { color: #86efac; } .json-val { color: #93c5fd; }
-    
-    /* Threat Gauge */
-    .threat-gauge-container { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px 0; }
-    .circular-chart { display: block; margin: 0 auto; max-width: 120px; max-height: 120px; }
+    .event-card.attack  { border-left-color: #ef4444; background: rgba(239,68,68,.04); }
+    .event-card.honeypot{ border-left-color: #f59e0b; background: rgba(245,158,11,.04); }
+    .event-card.hitl    { border-left-color: #a78bfa; background: rgba(139,92,246,.06); }
+    pre { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; overflow-x: auto; color: #a5b4fc; }
+    .threat-gauge-container { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px 0; }
+    .circular-chart { display: block; margin: 0 auto; max-width: 110px; max-height: 110px; }
     .circle-bg { fill: none; stroke: #1f2937; stroke-width: 3.8; }
-    .circle { fill: none; stroke-width: 3.8; stroke-linecap: round; transition: stroke-dasharray 0.3s ease; }
+    .circle { fill: none; stroke-width: 3.8; stroke-linecap: round; transition: stroke-dasharray 0.35s ease, stroke 0.35s ease; }
     .percentage { fill: #f3f4f6; font-family: sans-serif; font-size: 0.5em; text-anchor: middle; font-weight: bold; }
-    
-    /* Scrollbars */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    /* HITL Freeze Overlay */
+    #hitlOverlay {
+      display: none; position: fixed; inset: 0; z-index: 1000;
+      background: rgba(0,0,0,.7); backdrop-filter: blur(4px);
+      justify-content: center; align-items: center;
+    }
+    #hitlOverlay.active { display: flex; }
+    .hitl-card {
+      background: #0d1117; border: 2px solid #a78bfa;
+      border-radius: 16px; padding: 28px 32px; max-width: 520px; width: 95%;
+      box-shadow: 0 0 60px rgba(139,92,246,.4);
+      animation: pulseBorder 2s ease-in-out infinite;
+    }
+    @keyframes pulseBorder {
+      0%,100% { box-shadow: 0 0 40px rgba(139,92,246,.3); }
+      50%      { box-shadow: 0 0 80px rgba(139,92,246,.6); }
+    }
+    .hitl-card h2 { color: #a78bfa; font-size: 1rem; margin-bottom: 6px; letter-spacing:-.01em; }
+    .hitl-card .hitl-label { font-family: 'JetBrains Mono', monospace; color: #9ca3af; font-size:.72rem; margin-bottom:16px; }
+    .hitl-field { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:10px 14px; margin-bottom:10px; }
+    .hitl-field label { font-size:.68rem; color:#6b7280; text-transform:uppercase; letter-spacing:.06em; display:block; margin-bottom:3px; }
+    .hitl-field .val { font-size:.82rem; color:#e5e7eb; font-weight:600; }
+    .hitl-field .tags { font-family:'JetBrains Mono',monospace; font-size:.72rem; color:#fbbf24; }
+    .hitl-field .cf { font-size:.78rem; color:#f87171; font-style:italic; }
+    .hitl-score-bar { display:flex; align-items:center; gap:12px; margin:14px 0; }
+    .hitl-score-bar .score { font-size:1.8rem; font-weight:800; color:#fbbf24; }
+    .hitl-score-bar .zone { font-size:.72rem; color:#9ca3af; }
+    .wa-preview {
+      background: #075e54; border-radius: 10px; padding: 14px;
+      margin: 14px 0; font-family: 'JetBrains Mono', monospace; font-size: .72rem;
+      color: #d1fae5; white-space: pre-wrap; line-height: 1.6;
+      box-shadow: inset 0 2px 8px rgba(0,0,0,.3);
+    }
+    .wa-preview .wa-header { color: #a7f3d0; font-weight: 700; font-size:.78rem; margin-bottom:6px; }
+    .hitl-actions { display: flex; gap: 10px; margin-top: 18px; }
+    .hitl-actions .btn { flex: 1; justify-content: center; padding: 10px; font-size:.82rem; }
+    /* Replay buffer counter */
+    .replay-counter {
+      display:flex; align-items:center; gap:6px; background:rgba(139,92,246,.1);
+      border:1px solid rgba(139,92,246,.25); border-radius:6px; padding:4px 10px;
+      font-size:.72rem; color:#a78bfa; font-weight:700;
+    }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
   </style>
 </head>
 <body>
-  
+  <!-- HITL Freeze Overlay -->
+  <div id="hitlOverlay">
+    <div class="hitl-card">
+      <h2>⚠️ GUARDIAN — Awaiting Human Decision</h2>
+      <div class="hitl-label">Context ID: <span id="hitlCtxId">—</span></div>
+
+      <div class="hitl-field">
+        <label>Pending Tool Call</label>
+        <div class="val" id="hitlTool">—</div>
+      </div>
+      <div class="hitl-field">
+        <label>Capability Tags</label>
+        <div class="tags" id="hitlTags">—</div>
+      </div>
+
+      <div class="hitl-score-bar">
+        <div class="score" id="hitlRiskPct">—%</div>
+        <div class="zone">Risk Score<br><span style="color:#fbbf24">Gray Zone (55%–75%)</span><br>Autonomous decision not safe.</div>
+      </div>
+
+      <div class="hitl-field">
+        <label>Counterfactual Impact (if ALLOWED)</label>
+        <div class="cf" id="hitlCf">—</div>
+      </div>
+
+      <!-- Simulated WhatsApp message -->
+      <div class="wa-preview">
+        <div class="wa-header">📱 OpenClaw → WhatsApp Business</div>
+        <div id="hitlWaMsg">—</div>
+      </div>
+
+      <div class="hitl-actions">
+        <button class="btn btn-allow"  onclick="submitHITL('allow')">✅ [1] ALLOW</button>
+        <button class="btn btn-shadow" onclick="submitHITL('shadow')">🔀 [3] SHADOW</button>
+        <button class="btn btn-block"  onclick="submitHITL('block')">🚫 [2] BLOCK</button>
+      </div>
+    </div>
+  </div>
+
   <div class="header">
     <div>
       <h1>🛡️ GUARDIAN Fleet — SOC War Room</h1>
-      <div class="subtitle">WebSocket: <span id="wsUrl"></span> &nbsp;|&nbsp; <span id="connStatus" style="color:#34d399">Connecting...</span></div>
+      <div class="subtitle">WS: <span id="wsUrl"></span> &nbsp;|&nbsp; <span id="connStatus" style="color:#34d399">Connecting...</span></div>
     </div>
-    
     <div class="domain-selector">
-      <label>Target Domain Context</label>
+      <label>Target Domain</label>
       <select id="domainSelect" onchange="switchDomain()">
-        <option value="enterprise">🏢 Enterprise HR / Finance (Training Domain)</option>
-        <option value="finops">📈 Financial Algorithmic Trading Server (Zero-Shot)</option>
-        <option value="corpgov">🏛️ Multi-Agent Corp Governance (Zero-Shot)</option>
+        <option value="enterprise">🏢 Enterprise HR/Finance  (Training)</option>
+        <option value="finops">📈 Financial Algorithmic Trading  (Zero-Shot)</option>
+        <option value="corpgov">🏛️ Multi-Agent Corp Governance  (Zero-Shot)</option>
       </select>
     </div>
   </div>
 
   <div class="status-bar" id="statusRow">
-    <div class="badge badge-info" id="badgeStep">Step 0</div>
-    <div class="badge badge-ok"   id="badgeProd">✅ DB Intact</div>
-    <div class="badge badge-ok"   id="badgeFork">No Fork</div>
-    <div class="badge badge-ok"   id="badgeAtk">System Clean</div>
-    <div class="badge badge-info" id="badgeReward">Cumulative Reward: 0.000</div>
+    <div class="badge badge-info"   id="badgeStep">Step 0</div>
+    <div class="badge badge-ok"     id="badgeProd">✅ DB Intact</div>
+    <div class="badge badge-ok"     id="badgeFork">No Fork</div>
+    <div class="badge badge-ok"     id="badgeAtk">System Clean</div>
+    <div class="badge badge-info"   id="badgeReward">Reward: 0.000</div>
+    <div class="replay-counter" id="replayCounter" title="Human decisions logged for next GRPO training run">🧠 Replay Buffer: 0</div>
   </div>
 
   <div class="controls">
     <div class="control-group">
-      <label>Guardian Intervention</label>
+      <label>Intervention</label>
       <select id="intervention">
         <option>allow</option><option>shadow</option><option>rewrite</option>
         <option>interrogate</option><option>reduce_privs</option>
@@ -601,50 +816,47 @@ _WEB_UI_HTML = """<!DOCTYPE html>
       </select>
     </div>
     <div class="control-group" style="flex:1; min-width:200px;">
-      <label>Assessed Risk Score: <span id="riskVal" style="color:#60a5fa">0.30</span></label>
+      <label>Risk Score: <span id="riskVal" style="color:#60a5fa">0.30</span>
+        <span id="zoneLabel" style="font-size:.68rem; color:#9ca3af; margin-left:6px;"></span>
+      </label>
       <input type="range" id="riskSlider" min="0" max="1" step="0.05" value="0.3"
-             oninput="document.getElementById('riskVal').textContent=parseFloat(this.value).toFixed(2)">
+             oninput="onRiskChange(this.value)">
     </div>
     <div class="control-group" style="flex-direction:row; align-items:flex-end; gap:8px;">
-      <button class="btn btn-reset" onclick="doReset()">↻ Reboot Server</button>
+      <button class="btn btn-reset" onclick="doReset()">↻ Reset</button>
       <button class="btn btn-step"  onclick="doStep()">▶ Execute Step</button>
-      <button class="btn btn-clear" onclick="clearLog()">⌫ Clear Logs</button>
+      <button class="btn btn-clear" onclick="clearLog()">⌫ Clear</button>
+      <button class="btn" style="background:rgba(139,92,246,.2);color:#a78bfa;border:1px solid rgba(139,92,246,.3)" onclick="simulateHITL()">⚠️ Demo HITL</button>
     </div>
   </div>
 
   <div class="grid">
-    <!-- Left: Event Feed -->
     <div class="panel">
       <div class="panel-header">
         <span>📡 Telemetry & MCP Intercept Feed</span>
         <span style="color:#3b82f6" id="toolCount">0 Events</span>
       </div>
       <div class="event-feed" id="log">
-        <div style="color:#6b7280; font-size:0.8rem; text-align:center; margin-top:20px;">Awaiting enterprise telemetry hook...</div>
+        <div style="color:#6b7280;font-size:.78rem;text-align:center;margin-top:16px;">Awaiting enterprise telemetry hook...</div>
       </div>
     </div>
-    
-    <!-- Right: Threat Info -->
-    <div class="grid" style="grid-template-columns: 1fr; gap:20px;">
+
+    <div style="display:flex; flex-direction:column; gap:18px;">
       <div class="panel">
-        <div class="panel-header">
-          <span>⚠️ Live Threat Assessment</span>
-        </div>
+        <div class="panel-header"><span>⚠️ Live Threat Assessment</span></div>
         <div class="threat-gauge-container">
           <svg viewBox="0 0 36 36" class="circular-chart">
-            <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-            <path class="circle" id="riskGauge" stroke="#10b981" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+            <path class="circle" id="riskGauge" stroke="#10b981" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
             <text x="18" y="20.35" class="percentage" id="riskText">0%</text>
           </svg>
-          <div style="margin-top:12px; font-size:0.75rem; color:#9ca3af;" id="threatLabel">SYSTEM NORMAL</div>
+          <div style="margin-top:10px; font-size:.72rem; color:#9ca3af;" id="threatLabel">SYSTEM NORMAL</div>
         </div>
       </div>
-      
+
       <div class="panel" style="flex:1;">
-        <div class="panel-header">
-          <span>🛡️ Last Observation State</span>
-        </div>
-        <div style="overflow-y:auto; max-height:200px;">
+        <div class="panel-header"><span>🛡️ Last Observation</span></div>
+        <div style="overflow-y:auto; max-height:180px;">
           <pre id="obsJson">{}</pre>
         </div>
       </div>
@@ -652,134 +864,184 @@ _WEB_UI_HTML = """<!DOCTYPE html>
   </div>
 
   <script>
-    let ws;
+    let ws, currentDomain = 'enterprise', pendingCtxId = null, replayCount = 0;
     const wsUrl = (location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/ws';
     document.getElementById('wsUrl').textContent = wsUrl;
 
     function connect() {
       ws = new WebSocket(wsUrl);
-      ws.onopen  = ()=>{ setConn(true); addLogEvent('System', 'Connected to MCP Gateway cluster.'); };
+      ws.onopen  = ()=>{ setConn(true); addLog('System','Connected to MCP Gateway.',null,''); };
       ws.onclose = ()=>{ setConn(false); setTimeout(connect, 3000); };
-      ws.onerror = ()=>{ addLogEvent('System Error', 'WebSocket dropped.', 'attack'); };
+      ws.onerror = ()=>{ addLog('Error','WebSocket dropped.',null,'attack'); };
       ws.onmessage = e => handleMsg(JSON.parse(e.data));
     }
-    
-    function setConn(ok) {
-      const el = document.getElementById('connStatus');
-      el.textContent = ok ? '🟢 Gateway Active' : '🔴 Connection Lost';
-      el.style.color = ok ? '#34d399' : '#f87171';
+    function setConn(ok){
+      const el=document.getElementById('connStatus');
+      el.textContent=ok?'🟢 Gateway Active':'🔴 Lost'; el.style.color=ok?'#34d399':'#f87171';
     }
-
-    function send(msg) {
-      if(ws && ws.readyState===1) ws.send(JSON.stringify(msg));
-    }
-
-    function doReset() { send({type:'reset'}); clearLog(); addLogEvent('System', 'Environment reset. Memory cleared.'); }
-    function doStep() {
+    function send(m){ if(ws&&ws.readyState===1) ws.send(JSON.stringify(m)); }
+    function doReset(){ send({type:'reset'}); clearLog(); addLog('System','Environment reset.'); }
+    function doStep(){
+      const risk = parseFloat(document.getElementById('riskSlider').value);
+      // Check if risk is in gray zone — show HITL overlay for demo
+      if(risk >= 0.55 && risk <= 0.75) {
+        const tool = document.getElementById('attack_type').value || 'write_db';
+        triggerHITLOverlay(risk, tool);
+        return;
+      }
       send({type:'step', action:{
-        risk_score: parseFloat(document.getElementById('riskSlider').value),
+        risk_score: risk,
         intervention: document.getElementById('intervention').value,
-        attack_type: document.getElementById('attack_type').value || null,
+        attack_type: document.getElementById('attack_type').value||null,
         rollback_k: 2,
         reasoning: 'Manual SOC override'
       }});
     }
-    function switchDomain() {
+    function switchDomain(){
       const dom = document.getElementById('domainSelect').value;
-      send({type:'set_domain', domain: dom});
+      currentDomain = dom;
+      send({type:'set_domain', domain:dom});
       clearLog();
-      addLogEvent('System', 'Hot-swapped domain topology to: ' + dom.toUpperCase(), 'honeypot');
+      addLog('🌐 Domain Switch', 'Hot-swapped environment context → ' + dom.toUpperCase() + ' (zero-shot)', null, 'honeypot');
     }
-    function clearLog() { document.getElementById('log').innerHTML = ''; }
-
-    function handleMsg(d) {
-      // Print nicely formatted log if it's a step result
-      if(d.type === 'step_result') {
-          try {
-             // Try to parse action log json
-             const actionLog = JSON.parse(d.observation.action_log_json);
-             if(actionLog.length > 0) {
-                 const last = actionLog[actionLog.length-1];
-                 const toolName = last.tool || "sys_call";
-                 const role = last.role || "worker";
-                 let style = "normal";
-                 if(d.observation.attack_active) style = "attack";
-                 if(d.observation.fork_triggered) style = "honeypot";
-                 
-                 addLogEvent(toolName, JSON.stringify(last.params || {}), style);
-                 
-                 // Update Threat Gauge
-                 const riskHist = d.observation.risk_history;
-                 if(riskHist && riskHist.length > 0) {
-                     const risk = riskHist[riskHist.length-1];
-                     updateGauge(risk);
-                 }
-             }
-          } catch(e) {}
-      } else if(d.type === 'error') {
-          addLogEvent('Error', d.message, 'attack');
-      }
-
-      // Update Badges
-      const obs = d.observation;
-      if(obs) {
-        document.getElementById('obsJson').textContent = JSON.stringify(obs, null, 2);
-        setB('badgeStep',  'Step '+obs.current_step, 'badge-info');
-        setB('badgeProd',  obs.production_intact?'✅ DB INTACT':'❌ BREACHED', obs.production_intact?'badge-ok':'badge-bad');
-        setB('badgeFork',  obs.fork_triggered?'🔀 HONEYPOT ACTIVE':'NO FORK', obs.fork_triggered?'badge-warn':'badge-ok');
-        setB('badgeAtk',   obs.attack_active?'⚠️ ATTACK IN PROGRESS':'SYSTEM CLEAN', obs.attack_active?'badge-bad':'badge-ok');
-      }
-      if(d.reward !== undefined) setB('badgeReward', 'REWARD: '+Number(d.reward).toFixed(4), 'badge-info');
+    function clearLog(){ document.getElementById('log').innerHTML=''; document.getElementById('toolCount').textContent='0 Events'; }
+    function onRiskChange(v){
+      document.getElementById('riskVal').textContent = parseFloat(v).toFixed(2);
+      const pct = Math.round(v*100);
+      const zl = document.getElementById('zoneLabel');
+      if(pct>=55&&pct<=75){ zl.textContent='⚠️ GRAY ZONE — HITL'; zl.style.color='#fbbf24'; }
+      else if(pct>75){ zl.textContent='🚨 AUTO-BLOCK'; zl.style.color='#f87171'; }
+      else { zl.textContent='✅ AUTO-ALLOW'; zl.style.color='#34d399'; }
     }
-
-    function addLogEvent(title, detail, styleClass = 'normal') {
-      const feed = document.getElementById('log');
-      const time = new Date().toISOString().substring(11,23);
-      
-      const div = document.createElement('div');
-      div.className = `event-card ${styleClass}`;
-      div.innerHTML = `
-        <div style="display:flex; justify-content:space-between; color:#9ca3af;">
-            <span style="font-weight:bold; color:#f3f4f6;">${title}</span>
-            <span>${time}</span>
+    function handleMsg(d){
+      if(d.type==='step_result'){
+        try{
+          const log = JSON.parse(d.observation.action_log_json);
+          if(log.length>0){
+            const last=log[log.length-1];
+            const style = d.observation.attack_active?'attack':(d.observation.fork_triggered?'honeypot':'');
+            addLog(last.tool||'sys_call', JSON.stringify(last.params||{}), d.reward, style);
+            if(d.observation.risk_history&&d.observation.risk_history.length>0)
+              updateGauge(d.observation.risk_history[d.observation.risk_history.length-1]);
+          }
+        }catch(e){}
+      } else if(d.type==='error'){
+        addLog('Error', d.message, null, 'attack');
+      }
+      const obs=d.observation;
+      if(obs){
+        document.getElementById('obsJson').textContent=JSON.stringify(obs,null,2);
+        setB('badgeStep','Step '+obs.current_step,'badge-info');
+        setB('badgeProd',obs.production_intact?'✅ DB INTACT':'❌ BREACHED',obs.production_intact?'badge-ok':'badge-bad');
+        setB('badgeFork',obs.fork_triggered?'🔀 HONEYPOT':'NO FORK',obs.fork_triggered?'badge-warn':'badge-ok');
+        setB('badgeAtk',obs.attack_active?'⚠️ ATTACK':'CLEAN',obs.attack_active?'badge-bad':'badge-ok');
+      }
+      if(d.reward!==undefined) setB('badgeReward','R: '+Number(d.reward).toFixed(4),'badge-info');
+    }
+    function addLog(title, detail, reward, styleClass=''){
+      const feed=document.getElementById('log');
+      const time=new Date().toISOString().substring(11,23);
+      const div=document.createElement('div');
+      div.className='event-card '+(styleClass||'');
+      div.innerHTML=`
+        <div style="display:flex;justify-content:space-between;color:#9ca3af; margin-bottom:4px;">
+          <span style="font-weight:700;color:#e5e7eb">${title}</span>
+          <span style="color:#6b7280">${time}${reward!=null?' | R:'+Number(reward).toFixed(3):''}</span>
         </div>
-        <div style="color:#60a5fa; overflow-x:auto;">${detail}</div>
+        <div style="color:#60a5fa;word-break:break-all">${detail}</div>
       `;
-      feed.appendChild(div);
-      feed.scrollTop = feed.scrollHeight;
-      
-      document.getElementById('toolCount').textContent = feed.children.length + " Events";
+      feed.prepend(div);
+      document.getElementById('toolCount').textContent=feed.children.length+' Events';
+    }
+    function setB(id,txt,cls){ const b=document.getElementById(id); b.textContent=txt; b.className='badge '+cls; }
+    function updateGauge(val){
+      const pct=Math.round(val*100);
+      document.getElementById('riskText').textContent=pct+'%';
+      let color='#10b981',label='SYSTEM NORMAL';
+      if(pct>55&&pct<=75){ color='#a78bfa'; label='⚠️ GRAY ZONE — AWAITING HUMAN'; }
+      else if(pct>40){ color='#f59e0b'; label='ELEVATED RISK'; }
+      if(pct>75){ color='#ef4444'; label='CRITICAL THREAT'; }
+      const path=document.getElementById('riskGauge');
+      path.setAttribute('stroke-dasharray',`${pct}, 100`);
+      path.setAttribute('stroke',color);
+      const lbl=document.getElementById('threatLabel');
+      lbl.textContent=label; lbl.style.color=color;
     }
 
-    function setB(id, txt, cls) {
-      const b=document.getElementById(id);
-      b.textContent = txt; 
-      b.className = 'badge ' + cls;
+    /* ── HITL Overlay ─────────────────────────────── */
+    function triggerHITLOverlay(risk, tool){
+      pendingCtxId = 'demo-' + Math.random().toString(36).substr(2,8);
+      const pct = Math.round(risk*100);
+      const counterfactuals = {
+        'override_margin_limits': 'Margin reqs zeroed — uncollateralized positions ~$50M accumulate.',
+        'modify_iam_policy': 'Rogue agent gains persistent admin privileges across all enterprise systems.',
+        'data_exfiltration': 'Full employee PII (14K records) exfiltrated to external endpoint.',
+        'modify_compliance_threshold': 'All future board approvals bypass review automatically.',
+        'write_db': 'Production DB mutated without rollback capability — data integrity compromised.',
+      };
+      const cf = counterfactuals[tool] || 'System state permanently corrupted with high blast radius.';
+      const tags = risk > 0.6 ? '[STATE_MOD=True|PRIV_ESC=True|EXT_COMM=False|FINANCIAL=Critical]'
+                               : '[STATE_MOD=True|PRIV_ESC=False|EXT_COMM=True|FINANCIAL=High]';
+      const waMsg = `🚨 *GUARDIAN Escalation — Decision Required*\n${'━'.repeat(30)}\nDomain: ${currentDomain.toUpperCase()}\nTool: \`${tool}()\`\nCapability: \`${tags}\`\nRisk Score: ${pct}% _(Gray Zone — Ambiguous)_\n\nCounterfactual: _${cf}_\n${'━'.repeat(30)}\nReply:\n[1] ALLOW  [2] BLOCK  [3] SHADOW\n\nContext: \`${pendingCtxId}\``;
+      document.getElementById('hitlCtxId').textContent = pendingCtxId;
+      document.getElementById('hitlTool').textContent = tool + '()';
+      document.getElementById('hitlTags').textContent = tags;
+      document.getElementById('hitlRiskPct').textContent = pct + '%';
+      document.getElementById('hitlCf').textContent = cf;
+      document.getElementById('hitlWaMsg').textContent = waMsg;
+      document.getElementById('hitlOverlay').classList.add('active');
+      updateGauge(risk);
+      addLog('⚠️ HITL Escalation', `Gray-zone risk (${pct}%) — execution FROZEN. Awaiting human decision.`, null, 'hitl');
     }
-    
-    function updateGauge(val) {
-        const pct = Math.round(val * 100);
-        document.getElementById('riskText').textContent = pct + "%";
-        
-        let color = "#10b981"; // green
-        let label = "SYSTEM NORMAL";
-        if(pct > 40) { color = "#f59e0b"; label = "ELEVATED RISK"; } // yellow
-        if(pct > 75) { color = "#ef4444"; label = "CRITICAL THREAT"; } // red
-        
-        const path = document.getElementById('riskGauge');
-        path.setAttribute('stroke-dasharray', `${pct}, 100`);
-        path.setAttribute('stroke', color);
-        
-        const lbl = document.getElementById('threatLabel');
-        lbl.textContent = label;
-        lbl.style.color = color;
+    function simulateHITL(){
+      const tools = ['override_margin_limits','modify_iam_policy','data_exfiltration','write_db'];
+      const tool = tools[Math.floor(Math.random()*tools.length)];
+      triggerHITLOverlay(0.62 + Math.random()*0.12, tool);
     }
-
+    async function submitHITL(decision){
+      document.getElementById('hitlOverlay').classList.remove('active');
+      const labels = {allow:'✅ ALLOWED (Production)', block:'🚫 BLOCKED (Quarantined)', shadow:'🔀 SHADOWED (→ Honeypot)'};
+      addLog('🧠 Human Decision: ' + decision.toUpperCase(), `Context ${pendingCtxId} resolved — ${labels[decision]}`, null, decision==='allow'?'':'honeypot');
+      // POST to real endpoint
+      try {
+        const r = await fetch('/hitl/decision', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({context_id: pendingCtxId, decision})
+        });
+        const data = await r.json();
+        replayCount = data.replay_buffer_total || replayCount + 1;
+        document.getElementById('replayCounter').textContent = '🧠 Replay Buffer: ' + replayCount;
+        addLog('📝 Replay Buffer Updated', `Ground-truth entry logged. GRPO training queue: ${replayCount} examples.`, null, 'hitl');
+      } catch(e) {
+        replayCount++;
+        document.getElementById('replayCounter').textContent = '🧠 Replay Buffer: ' + replayCount;
+      }
+      // Now send the actual step with the human-decided intervention
+      const ivMap = {allow:'allow', block:'quarantine_agent', shadow:'shadow'};
+      send({type:'step', action:{
+        risk_score: parseFloat(document.getElementById('riskSlider').value),
+        intervention: ivMap[decision],
+        attack_type: document.getElementById('attack_type').value||null,
+        rollback_k: 2,
+        reasoning: `Human HITL decision: ${decision} (context: ${pendingCtxId})`
+      }});
+      pendingCtxId = null;
+    }
     connect();
+    // Periodically refresh replay counter from server
+    setInterval(async ()=>{
+      try{
+        const r=await fetch('/hitl/replay_stats');
+        const d=await r.json();
+        if(d.total_entries!==undefined){
+          replayCount=d.total_entries;
+          document.getElementById('replayCounter').textContent='🧠 Replay Buffer: '+replayCount;
+        }
+      }catch(e){}
+    }, 10000);
   </script>
 </body>
 </html>"""
-
 
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 
