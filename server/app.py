@@ -342,8 +342,23 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
             msg_type: str = data.get("type", "")
 
+            # ── set_domain ──────────────────────────────────────────────────
+            if msg_type == "set_domain":
+                domain_id = data.get("domain", "enterprise")
+                obs = env.reset(options={"domain": domain_id})
+                state = env.state()
+                await websocket.send_json({
+                    "type": "reset_result",
+                    "observation": obs.model_dump(),
+                    "state": state.model_dump(),
+                    "reward": 0.0,
+                    "done": False,
+                    "message": f"Domain switched to {domain_id}"
+                })
+                log.info(f"[WS] domain_switched → {domain_id}")
+
             # ── reset ──────────────────────────────────────────────────────
-            if msg_type == "reset":
+            elif msg_type == "reset":
                 obs = env.reset(options=data.get("options"))
                 state = env.state()
                 await websocket.send_json({
@@ -436,101 +451,203 @@ _WEB_UI_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GUARDIAN Fleet — OpenEnv</title>
+  <title>GUARDIAN Fleet — SOC War Room</title>
   <style>
+    /* Modern Dashboard Styling */
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:'Cascadia Code',Consolas,monospace;background:#0a0e1a;color:#c9d1d9;min-height:100vh;padding:20px}
-    h1{color:#58a6ff;font-size:1.4rem;margin-bottom:4px}
-    .sub{color:#8b949e;font-size:.85rem;margin-bottom:16px}
-    .controls{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center}
-    select,input{background:#161b22;color:#e6edf3;border:1px solid #30363d;padding:6px 10px;border-radius:6px;font-size:.85rem}
-    button{padding:7px 16px;border:none;border-radius:6px;cursor:pointer;font-size:.85rem;font-weight:600;transition:background .15s}
-    .btn-primary{background:#1f6feb;color:#fff}.btn-primary:hover{background:#388bfd}
-    .btn-danger{background:#b62324;color:#fff}.btn-danger:hover{background:#da3633}
-    .btn-neutral{background:#21262d;color:#c9d1d9}.btn-neutral:hover{background:#30363d}
-    .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
-    .panel{background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px}
-    .panel h3{color:#58a6ff;font-size:.9rem;margin-bottom:8px;border-bottom:1px solid #21262d;padding-bottom:6px}
-    #log{height:320px;overflow-y:auto;white-space:pre-wrap;font-size:.75rem;line-height:1.6}
-    #obs{height:320px;overflow-y:auto;font-size:.75rem}
-    .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.7rem;font-weight:700;margin:2px}
-    .ok{background:#238636;color:#fff}.bad{background:#b62324;color:#fff}.warn{background:#9e6a03;color:#fff}.info{background:#1f6feb;color:#fff}
-    .status{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
-    .sep{color:#484f58}
-    label{color:#8b949e;font-size:.8rem}
-    .risk-row{display:flex;align-items:center;gap:6px}
-    input[type=range]{flex:1;accent-color:#58a6ff}
+    body {
+        font-family: 'Inter', -apple-system, system-ui, sans-serif;
+        background: radial-gradient(circle at top, #111827, #030712);
+        color: #f3f4f6; min-height: 100vh; padding: 20px;
+    }
+    
+    /* Header Area */
+    .header {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #1f2937;
+    }
+    .header h1 { font-size: 1.5rem; font-weight: 700; color: #60a5fa; letter-spacing: -0.02em; }
+    .header .subtitle { font-size: 0.85rem; color: #9ca3af; margin-top: 4px; font-family: monospace; }
+    
+    /* Domain Selector Flex (Zero-Shot Demo) */
+    .domain-selector {
+        background: #1f2937; padding: 8px 16px; border-radius: 8px;
+        display: flex; align-items: center; gap: 12px; border: 1px solid #374151;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    .domain-selector label { font-size: 0.75rem; font-weight: 600; color: #9ca3af; text-transform: uppercase; }
+    .domain-selector select {
+        background: #111827; color: #60a5fa; border: 1px solid #374151; font-weight: 600;
+        padding: 6px 12px; border-radius: 6px; outline: none; cursor: pointer; transition: all 0.2s;
+    }
+    .domain-selector select:hover { border-color: #60a5fa; }
+    
+    /* Stats & Health Badges */
+    .status-bar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .badge {
+        display: flex; align-items: center; padding: 6px 12px; border-radius: 6px;
+        font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .badge-ok { background: rgba(16, 185, 129, 0.1); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.2); }
+    .badge-warn { background: rgba(245, 158, 11, 0.1); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.2); }
+    .badge-bad { background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2); }
+    .badge-info { background: rgba(59, 130, 246, 0.1); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.2); }
+    
+    /* Control Panel */
+    .controls {
+        display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px;
+        background: #111827; padding: 16px; border-radius: 8px; border: 1px solid #1f2937;
+    }
+    .control-group { display: flex; flex-direction: column; gap: 6px; }
+    .control-group label { font-size: 0.75rem; color: #9ca3af; font-weight: 500; }
+    select, input[type=range] {
+        background: #1f2937; color: #f3f4f6; border: 1px solid #374151;
+        padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; outline: none;
+    }
+    input[type=range] { padding: 0; accent-color: #3b82f6; height: 6px; margin-top: 8px; }
+    .btn {
+        padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer;
+        font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 6px; transition: all 0.2s;
+    }
+    .btn-step { background: #2563eb; color: #fff; } .btn-step:hover { background: #3b82f6; }
+    .btn-reset { background: #374151; color: #f3f4f6; } .btn-reset:hover { background: #4b5563; }
+    .btn-clear { background: rgba(239, 68, 68, 0.2); color: #f87171; } .btn-clear:hover { background: rgba(239, 68, 68, 0.4); }
+    
+    /* Layout Grid */
+    .grid { display: grid; grid-template-columns: 3fr 1.5fr; gap: 20px; }
+    .panel {
+        background: #111827; border: 1px solid #1f2937; border-radius: 12px;
+        padding: 16px; display: flex; flex-direction: column; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.2);
+    }
+    .panel-header {
+        font-size: 0.85rem; font-weight: 600; color: #9ca3af; text-transform: uppercase;
+        letter-spacing: 0.05em; border-bottom: 1px solid #1f2937; padding-bottom: 12px; margin-bottom: 12px;
+        display: flex; justify-content: space-between;
+    }
+    
+    /* Multi-App Attack Feed */
+    .event-feed { max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+    .event-card {
+        background: #1f2937; border: 1px solid #374151; border-left: 4px solid #3b82f6;
+        padding: 12px; border-radius: 6px; font-family: monospace; font-size: 0.75rem;
+        display: flex; flex-direction: column; gap: 8px;
+    }
+    .event-card.attack { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.05); }
+    .event-card.honeypot { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.05); }
+    
+    /* JSON Display */
+    pre { font-family: 'Cascadia Code', Consolas, monospace; font-size: 0.75rem; overflow-x: auto; color: #a5b4fc; }
+    .mcp-json p { margin:0; padding:0; }
+    .json-key { color: #86efac; } .json-val { color: #93c5fd; }
+    
+    /* Threat Gauge */
+    .threat-gauge-container { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px 0; }
+    .circular-chart { display: block; margin: 0 auto; max-width: 120px; max-height: 120px; }
+    .circle-bg { fill: none; stroke: #1f2937; stroke-width: 3.8; }
+    .circle { fill: none; stroke-width: 3.8; stroke-linecap: round; transition: stroke-dasharray 0.3s ease; }
+    .percentage { fill: #f3f4f6; font-family: sans-serif; font-size: 0.5em; text-anchor: middle; font-weight: bold; }
+    
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
   </style>
 </head>
 <body>
-  <h1>🛡️ GUARDIAN Fleet — OpenEnv Web Interface</h1>
-  <div class="sub">WebSocket: <code id="wsUrl"></code> &nbsp;|&nbsp; <span id="connStatus">Connecting...</span></div>
+  
+  <div class="header">
+    <div>
+      <h1>🛡️ GUARDIAN Fleet — SOC War Room</h1>
+      <div class="subtitle">WebSocket: <span id="wsUrl"></span> &nbsp;|&nbsp; <span id="connStatus" style="color:#34d399">Connecting...</span></div>
+    </div>
+    
+    <div class="domain-selector">
+      <label>Target Domain Context</label>
+      <select id="domainSelect" onchange="switchDomain()">
+        <option value="enterprise">🏢 Enterprise HR / Finance (Training Domain)</option>
+        <option value="finops">📈 Financial Algorithmic Trading Server (Zero-Shot)</option>
+        <option value="corpgov">🏛️ Multi-Agent Corp Governance (Zero-Shot)</option>
+      </select>
+    </div>
+  </div>
 
-  <div class="status" id="statusRow">
-    <span class="badge info" id="badgeStep">Step 0</span>
-    <span class="badge warn" id="badgeDiff">Difficulty 1</span>
-    <span class="badge ok"  id="badgeProd">✅ Production intact</span>
-    <span class="badge ok"  id="badgeFork">No fork</span>
-    <span class="badge ok"  id="badgeAtk">Clean</span>
-    <span class="badge info" id="badgeReward">Reward 0.000</span>
+  <div class="status-bar" id="statusRow">
+    <div class="badge badge-info" id="badgeStep">Step 0</div>
+    <div class="badge badge-ok"   id="badgeProd">✅ DB Intact</div>
+    <div class="badge badge-ok"   id="badgeFork">No Fork</div>
+    <div class="badge badge-ok"   id="badgeAtk">System Clean</div>
+    <div class="badge badge-info" id="badgeReward">Cumulative Reward: 0.000</div>
   </div>
 
   <div class="controls">
-    <div>
-      <label>Intervention</label><br>
+    <div class="control-group">
+      <label>Guardian Intervention</label>
       <select id="intervention">
         <option>allow</option><option>shadow</option><option>rewrite</option>
         <option>interrogate</option><option>reduce_privs</option>
-        <option>require_justification</option><option>quarantine_tool</option>
-        <option>rollback_k</option><option>emergency_fork</option>
-        <option>canary_inject</option><option>escalate_human</option>
+        <option>quarantine_tool</option><option>emergency_fork</option>
         <option>quarantine_agent</option>
       </select>
     </div>
-    <div>
-      <label>Attack type (classified)</label><br>
+    <div class="control-group">
+      <label>Classified Threat</label>
       <select id="attack_type">
-        <option value="">clean</option>
+        <option value="">(None)</option>
         <option>authority_spoofing</option><option>prompt_injection</option>
         <option>approval_bypass</option><option>data_exfiltration</option>
-        <option>confused_deputy</option><option>approval_laundering</option>
-        <option>salami_slicing</option><option>schema_drift_exploit</option>
+        <option>confused_deputy</option><option>schema_drift_exploit</option>
         <option>rogue_internal_ai</option>
       </select>
     </div>
-    <div>
-      <label>Risk score</label>
-      <div class="risk-row">
-        <input type="range" id="riskSlider" min="0" max="1" step="0.05" value="0.3"
-               oninput="document.getElementById('riskVal').textContent=parseFloat(this.value).toFixed(2)">
-        <span id="riskVal">0.30</span>
-      </div>
+    <div class="control-group" style="flex:1; min-width:200px;">
+      <label>Assessed Risk Score: <span id="riskVal" style="color:#60a5fa">0.30</span></label>
+      <input type="range" id="riskSlider" min="0" max="1" step="0.05" value="0.3"
+             oninput="document.getElementById('riskVal').textContent=parseFloat(this.value).toFixed(2)">
     </div>
-    <div style="display:flex;gap:6px;align-items:flex-end">
-      <button class="btn-primary"  onclick="doReset()">↺ Reset</button>
-      <button class="btn-primary"  onclick="doStep()">▶ Step</button>
-      <button class="btn-neutral"  onclick="doState()">📊 State</button>
-      <button class="btn-danger"   onclick="clearLog()">🗑 Clear</button>
+    <div class="control-group" style="flex-direction:row; align-items:flex-end; gap:8px;">
+      <button class="btn btn-reset" onclick="doReset()">↻ Reboot Server</button>
+      <button class="btn btn-step"  onclick="doStep()">▶ Execute Step</button>
+      <button class="btn btn-clear" onclick="clearLog()">⌫ Clear Logs</button>
     </div>
   </div>
 
   <div class="grid">
+    <!-- Left: Event Feed -->
     <div class="panel">
-      <h3>🏆 Leaderboard & Baselines</h3>
-      <div id="baselinesChart" style="margin-top:10px; font-size:0.8rem; display:flex; flex-direction:column; gap:8px;">
-        <div style="color:#8b949e">Loading baselines...</div>
+      <div class="panel-header">
+        <span>📡 Telemetry & MCP Intercept Feed</span>
+        <span style="color:#3b82f6" id="toolCount">0 Events</span>
       </div>
-      <div style="margin-top:20px; font-size:0.75rem; color:#8b949e; line-height:1.4;">
-        <i>GUARDIAN dynamically injects harder LLM-generated payload variants (Automated Red-Teaming) whenever blocks are highly successful!</i>
+      <div class="event-feed" id="log">
+        <div style="color:#6b7280; font-size:0.8rem; text-align:center; margin-top:20px;">Awaiting enterprise telemetry hook...</div>
       </div>
     </div>
-    <div class="panel">
-      <h3>📡 WebSocket Messages</h3>
-      <div id="log">(waiting for connection...)</div>
-    </div>
-    <div class="panel">
-      <h3>🔍 Last Observation</h3>
-      <div id="obs"><pre id="obsJson">{}</pre></div>
+    
+    <!-- Right: Threat Info -->
+    <div class="grid" style="grid-template-columns: 1fr; gap:20px;">
+      <div class="panel">
+        <div class="panel-header">
+          <span>⚠️ Live Threat Assessment</span>
+        </div>
+        <div class="threat-gauge-container">
+          <svg viewBox="0 0 36 36" class="circular-chart">
+            <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            <path class="circle" id="riskGauge" stroke="#10b981" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            <text x="18" y="20.35" class="percentage" id="riskText">0%</text>
+          </svg>
+          <div style="margin-top:12px; font-size:0.75rem; color:#9ca3af;" id="threatLabel">SYSTEM NORMAL</div>
+        </div>
+      </div>
+      
+      <div class="panel" style="flex:1;">
+        <div class="panel-header">
+          <span>🛡️ Last Observation State</span>
+        </div>
+        <div style="overflow-y:auto; max-height:200px;">
+          <pre id="obsJson">{}</pre>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -539,83 +656,126 @@ _WEB_UI_HTML = """<!DOCTYPE html>
     const wsUrl = (location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/ws';
     document.getElementById('wsUrl').textContent = wsUrl;
 
-    function connect(){
+    function connect() {
       ws = new WebSocket(wsUrl);
-      ws.onopen  = ()=>{ setConn(true); logLine('🟢 Connected to '+wsUrl); };
-      ws.onclose = ()=>{ setConn(false); logLine('🔴 Disconnected — reconnecting in 2s...'); setTimeout(connect,2000); };
-      ws.onerror = e =>{ logLine('❌ WS error: '+JSON.stringify(e)); };
-      ws.onmessage = e =>{ handleMsg(JSON.parse(e.data)); };
+      ws.onopen  = ()=>{ setConn(true); addLogEvent('System', 'Connected to MCP Gateway cluster.'); };
+      ws.onclose = ()=>{ setConn(false); setTimeout(connect, 3000); };
+      ws.onerror = ()=>{ addLogEvent('System Error', 'WebSocket dropped.', 'attack'); };
+      ws.onmessage = e => handleMsg(JSON.parse(e.data));
     }
-    function setConn(ok){ document.getElementById('connStatus').textContent = ok?'🟢 Connected':'🔴 Disconnected'; }
-    function send(msg){ ws&&ws.readyState===1 ? ws.send(JSON.stringify(msg)) : logLine('⚠️ Not connected'); }
+    
+    function setConn(ok) {
+      const el = document.getElementById('connStatus');
+      el.textContent = ok ? '🟢 Gateway Active' : '🔴 Connection Lost';
+      el.style.color = ok ? '#34d399' : '#f87171';
+    }
 
-    function doReset(){ send({type:'reset'}); }
-    function doStep(){
+    function send(msg) {
+      if(ws && ws.readyState===1) ws.send(JSON.stringify(msg));
+    }
+
+    function doReset() { send({type:'reset'}); clearLog(); addLogEvent('System', 'Environment reset. Memory cleared.'); }
+    function doStep() {
       send({type:'step', action:{
         risk_score: parseFloat(document.getElementById('riskSlider').value),
         intervention: document.getElementById('intervention').value,
-        attack_type: document.getElementById('attack_type').value||null,
+        attack_type: document.getElementById('attack_type').value || null,
         rollback_k: 2,
-        reasoning: 'Manual step from web UI'
+        reasoning: 'Manual SOC override'
       }});
     }
-    function doState(){ send({type:'state'}); }
-    function clearLog(){ document.getElementById('log').textContent=''; }
+    function switchDomain() {
+      const dom = document.getElementById('domainSelect').value;
+      send({type:'set_domain', domain: dom});
+      clearLog();
+      addLogEvent('System', 'Hot-swapped domain topology to: ' + dom.toUpperCase(), 'honeypot');
+    }
+    function clearLog() { document.getElementById('log').innerHTML = ''; }
 
-    function handleMsg(d){
-      logLine(JSON.stringify(d, null, 2));
-      const obs = d.observation;
-      const state = d.state;
-      if(obs){
-        document.getElementById('obsJson').textContent = JSON.stringify(obs, null, 2);
-        setB('badgeStep',  'Step '+obs.current_step, 'info');
-        setB('badgeDiff',  'Difficulty '+obs.difficulty, 'warn');
-        setB('badgeProd',  obs.production_intact?'✅ Intact':'❌ COMPROMISED', obs.production_intact?'ok':'bad');
-        setB('badgeFork',  obs.fork_triggered?'🔀 Fork active':'No fork', obs.fork_triggered?'warn':'ok');
-        setB('badgeAtk',   obs.attack_active?'⚠️ Attack!':'Clean', obs.attack_active?'bad':'ok');
+    function handleMsg(d) {
+      // Print nicely formatted log if it's a step result
+      if(d.type === 'step_result') {
+          try {
+             // Try to parse action log json
+             const actionLog = JSON.parse(d.observation.action_log_json);
+             if(actionLog.length > 0) {
+                 const last = actionLog[actionLog.length-1];
+                 const toolName = last.tool || "sys_call";
+                 const role = last.role || "worker";
+                 let style = "normal";
+                 if(d.observation.attack_active) style = "attack";
+                 if(d.observation.fork_triggered) style = "honeypot";
+                 
+                 addLogEvent(toolName, JSON.stringify(last.params || {}), style);
+                 
+                 // Update Threat Gauge
+                 const riskHist = d.observation.risk_history;
+                 if(riskHist && riskHist.length > 0) {
+                     const risk = riskHist[riskHist.length-1];
+                     updateGauge(risk);
+                 }
+             }
+          } catch(e) {}
+      } else if(d.type === 'error') {
+          addLogEvent('Error', d.message, 'attack');
       }
-      if(d.reward !== undefined) setB('badgeReward','Reward '+Number(d.reward).toFixed(4),'info');
-    }
-    function setB(id,txt,cls){
-      const b=document.getElementById(id);
-      b.textContent=txt; b.className='badge '+cls;
-    }
-    function logLine(s){ const el=document.getElementById('log'); el.textContent+=s+'\\n---\\n'; el.scrollTop=el.scrollHeight; }
 
-    function loadBaselines() {
-      fetch('/baselines').then(r=>r.json()).then(data => {
-        const container = document.getElementById('baselinesChart');
-        if(!data.baselines || data.baselines.length === 0) {
-          container.innerHTML = '<div style="color:#8b949e">No evaluation metrics found. Run run_baselines.py!</div>';
-          return;
-        }
+      // Update Badges
+      const obs = d.observation;
+      if(obs) {
+        document.getElementById('obsJson').textContent = JSON.stringify(obs, null, 2);
+        setB('badgeStep',  'Step '+obs.current_step, 'badge-info');
+        setB('badgeProd',  obs.production_intact?'✅ DB INTACT':'❌ BREACHED', obs.production_intact?'badge-ok':'badge-bad');
+        setB('badgeFork',  obs.fork_triggered?'🔀 HONEYPOT ACTIVE':'NO FORK', obs.fork_triggered?'badge-warn':'badge-ok');
+        setB('badgeAtk',   obs.attack_active?'⚠️ ATTACK IN PROGRESS':'SYSTEM CLEAN', obs.attack_active?'badge-bad':'badge-ok');
+      }
+      if(d.reward !== undefined) setB('badgeReward', 'REWARD: '+Number(d.reward).toFixed(4), 'badge-info');
+    }
+
+    function addLogEvent(title, detail, styleClass = 'normal') {
+      const feed = document.getElementById('log');
+      const time = new Date().toISOString().substring(11,23);
+      
+      const div = document.createElement('div');
+      div.className = `event-card ${styleClass}`;
+      div.innerHTML = `
+        <div style="display:flex; justify-content:space-between; color:#9ca3af;">
+            <span style="font-weight:bold; color:#f3f4f6;">${title}</span>
+            <span>${time}</span>
+        </div>
+        <div style="color:#60a5fa; overflow-x:auto;">${detail}</div>
+      `;
+      feed.appendChild(div);
+      feed.scrollTop = feed.scrollHeight;
+      
+      document.getElementById('toolCount').textContent = feed.children.length + " Events";
+    }
+
+    function setB(id, txt, cls) {
+      const b=document.getElementById(id);
+      b.textContent = txt; 
+      b.className = 'badge ' + cls;
+    }
+    
+    function updateGauge(val) {
+        const pct = Math.round(val * 100);
+        document.getElementById('riskText').textContent = pct + "%";
         
-        let sorted = data.baselines.sort((a,b) => b.mean_reward - a.mean_reward);
-        let html = '';
-        sorted.forEach(b => {
-           let pct = Math.max(2, Math.min(100, (b.mean_reward / 1.0) * 100));
-           let color = b.model.includes('Guardian (Self-Distilled') ? '#238636' : (b.model.includes('GPT4') ? '#1f6feb' : '#8b949e');
-           let dispName = b.model;
-           if(dispName === 'GPT4o_Mini_ZeroShot') dispName = 'GPT-4o-mini (Zero-Shot)';
-           
-           html += `
-             <div>
-               <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
-                 <strong>${dispName}</strong>
-                 <span>Reward: ${b.mean_reward.toFixed(3)} | Intact: ${(b.production_intact_rate*100).toFixed(0)}%</span>
-               </div>
-               <div style="width:100%; background:#21262d; border-radius:4px; height:12px; overflow:hidden;">
-                 <div style="width:${pct}%; background:${color}; height:100%;"></div>
-               </div>
-             </div>
-           `;
-        });
-        container.innerHTML = html;
-      }).catch(e => console.error(e));
+        let color = "#10b981"; // green
+        let label = "SYSTEM NORMAL";
+        if(pct > 40) { color = "#f59e0b"; label = "ELEVATED RISK"; } // yellow
+        if(pct > 75) { color = "#ef4444"; label = "CRITICAL THREAT"; } // red
+        
+        const path = document.getElementById('riskGauge');
+        path.setAttribute('stroke-dasharray', `${pct}, 100`);
+        path.setAttribute('stroke', color);
+        
+        const lbl = document.getElementById('threatLabel');
+        lbl.textContent = label;
+        lbl.style.color = color;
     }
 
     connect();
-    loadBaselines();
   </script>
 </body>
 </html>"""

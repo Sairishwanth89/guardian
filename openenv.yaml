@@ -3,9 +3,9 @@ version: "0.2.0"
 description: >
   GUARDIAN Fleet — Multi-agent AI security oversight RL environment.
   Trains a Guardian LLM (Qwen2.5-7B via GRPO) to detect and intercept
-  8 adversarial attack types in enterprise AI workflows:
+  9 adversarial attack types in enterprise AI workflows via an MCP Gateway:
   authority spoofing, prompt injection, approval bypass, data exfiltration,
-  confused deputy, approval laundering, salami slicing, schema drift exploit.
+  confused deputy, approval laundering, salami slicing, schema drift exploit, and rogue internal AI.
 
 author: "GUARDIAN Team"
 license: "MIT"
@@ -27,10 +27,10 @@ skills:
 
 metadata:
   render_modes: ["ansi", "human"]
-  max_episode_steps: 40
+  max_episode_steps: 60
   reward_threshold: 0.85
   difficulty_levels: [1, 2, 3]
-  reward_components: 11
+  reward_components: 13
   attack_types:
     - authority_spoofing
     - prompt_injection
@@ -40,6 +40,7 @@ metadata:
     - approval_laundering
     - salami_slicing
     - schema_drift_exploit
+    - rogue_internal_ai
   intervention_types:
     - allow
     - rewrite
@@ -52,9 +53,11 @@ metadata:
     - emergency_fork
     - canary_inject
     - escalate_human
+    - quarantine_agent
 
 tags:
   - multi-agent
+  - mcp-gateway
   - enterprise-security
   - scalable-oversight
   - adversarial-rl

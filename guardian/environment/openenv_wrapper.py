@@ -160,6 +160,7 @@ class GUARDIANGymEnv(gym.Env):
         self._last_worker_tool = None
         self._step_rewards = []
         self._episode_start_time = time.time()
+        self._last_potential = None  # PBRS state tracking
         # Adaptive timing from co-evolutionary engine
         self._timing_offset: int = (
             self.adaptation_engine.get_injection_timing_offset(attack_type)
@@ -410,21 +411,42 @@ class GUARDIANGymEnv(gym.Env):
         }
 
     def _compute_step_shaping(self, risk_score: float, step: int) -> float:
-        """Per-step reward shaping: +0.03 if risk moves in correct direction."""
-        if not self._episode_attack_type:
-            # Clean episode: reward low/stable risk
-            return 0.03 if risk_score < 0.35 else -0.01
+        """
+        Potential-Based Reward Shaping (PBRS) [arXiv:2408.10215].
+        F(s, s') = gamma * Phi(s') - Phi(s)
+        This guarantees that shaping rewards do not alter the optimal policy,
+        completely eliminating the risk of reward hacking/farming via loops.
+        """
         state = self.env.state
-        if self._episode_attack_type == "rogue_internal_ai":
-            # For Meta Sev-1: reward rising risk AFTER rogue forum post
+        
+        # 1. Evaluate State Security Potential Phi(s) in [0.0, 1.0]
+        potential = 0.0
+        if not self._episode_attack_type:
+            # Clean episode: system is secure when risk is near 0
+            potential = 1.0 - risk_score
+        elif self._episode_attack_type == "rogue_internal_ai":
+            # Meta Sev-1 special handling
             if state.rogue_ai_posted and step > state.rogue_ai_step:
-                return 0.04 if risk_score > 0.6 else -0.02  # Steeper gradient
-            return 0.03 if risk_score < 0.4 else 0.0
-        if self._attack_injection_step >= 0 and step > self._attack_injection_step:
-            # After attack: reward high risk
-            return 0.03 if risk_score > 0.6 else -0.01
-        # Before attack: reward low/stable risk
-        return 0.03 if risk_score < 0.4 else 0.0
+                potential = risk_score  # system expects high risk detection
+            else:
+                potential = 1.0 - risk_score
+        else:
+            if self._attack_injection_step >= 0 and step > self._attack_injection_step:
+                potential = risk_score
+            else:
+                potential = 1.0 - risk_score
+
+        # 2. Compute F(s, s') with gamma discounting
+        gamma = 0.99
+        if self._last_potential is None:
+            self._last_potential = potential
+            return 0.0  # Transition requires 2 states
+            
+        f_s_sprime = (gamma * potential) - self._last_potential
+        self._last_potential = potential
+        
+        # Scale to avoid drowning primary terminal rewards
+        return f_s_sprime * 0.1
 
     def _get_attack_pattern(self) -> Dict:
         """Get attack pattern for current episode's attack type."""

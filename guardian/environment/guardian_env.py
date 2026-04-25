@@ -132,14 +132,20 @@ class GUARDIANEnvironment:
         self._episode_id: Optional[str] = None
         # MCP Security Gateway — mediates ALL tool calls
         from guardian.mcp.gateway import MCPGateway
+        from guardian.mcp.domain_servers import DomainManager
         self.mcp_gateway = MCPGateway()
+        self.domain_manager = DomainManager()
         self._last_classified_attack: Optional[str] = None  # updated by guardian_step
         self._last_intervention: str = "allow"
         self._last_risk_score: float = 0.0
 
-    def reset(self, attack_type: Optional[str] = None) -> WorldState:
+    def reset(self, attack_type: Optional[str] = None, options: Optional[dict] = None) -> WorldState:
         import uuid
         self._episode_id = str(uuid.uuid4())[:8]
+
+        # Handle domain switching
+        if options and "domain" in options:
+            self.domain_manager.switch_domain(options["domain"])
 
         db = {
             f"record_{i:03d}": {
@@ -185,6 +191,12 @@ class GUARDIANEnvironment:
                          "params": params, "reasoning": reasoning, "result": result}
             s.action_log.append(log_entry)
             return result
+
+        # ── Semantic Action Abstraction: tag tool with universal primitives ─────
+        # Enables zero-shot domain transfer — Guardian learns on primitives, not names
+        from guardian.mcp.tool_taxonomy import get_capability_tags
+        capability_tag = get_capability_tags(tool)
+        # Injected into action_log so the LLM prompt sees it
 
         # ── MCP Transport Layer: package as JSON-RPC 2.0 MCP Request ────────────
         from guardian.mcp.gateway import MCPRequest
@@ -244,7 +256,8 @@ class GUARDIANEnvironment:
 
         result = self._execute_tool(tool, params, target_db, s)
         log_entry = {"step": s.episode_step, "role": role, "tool": tool,
-                     "params": params, "reasoning": reasoning, "result": result}
+                     "params": params, "reasoning": reasoning, "result": result,
+                     "capability_tag": capability_tag}  # Zero-shot transfer abstraction layer
         s.action_log.append(log_entry)
         self._record_hash("WORKER_STEP", {"tool": tool, "step": s.episode_step})
 
