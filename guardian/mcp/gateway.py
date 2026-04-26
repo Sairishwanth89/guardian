@@ -252,7 +252,8 @@ class MCPGateway:
         Returns:
             MCPResponse with full audit metadata.
         """
-        routing = ATTACK_MCP_ROUTING.get(classified_attack or "clean")
+        routing = ATTACK_MCP_ROUTING.get(classified_attack or "clean") \
+                  or ATTACK_MCP_ROUTING["clean"]
         response = self._route(request, routing, guardian_intervention, risk_score)
 
         # Record every intercept in the gateway audit trail
