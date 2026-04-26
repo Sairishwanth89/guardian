@@ -290,12 +290,17 @@ for ep in range(1, cfg["TOTAL_EPISODES"] + 1):
         result.production_intact,
     )
 
-    # Collect training samples (mix in HITL data for behavioral cloning)
-    all_samples.extend(result.training_samples)
+    # Collect training samples — tag each with the episode reward so
+    # the GRPO reward_lookup closure gets real gradient signal (not 0.4 default)
+    ep_reward = result.reward
+    tagged_samples = [{**s, "reward": ep_reward} for s in result.training_samples]
+    all_samples.extend(tagged_samples)
     if hitl_samples:
         import random
-        # Inject up to 2 random HITL samples per episode to prevent catastrophic forgetting
-        all_samples.extend(random.sample(hitl_samples, min(2, len(hitl_samples))))
+        # HITL golden examples: give them a high reward anchor (0.85)
+        hitl_tagged = [{**s, "reward": 0.85} for s in
+                       random.sample(hitl_samples, min(2, len(hitl_samples)))]
+        all_samples.extend(hitl_tagged)
 
     # Console progress
     if ep % 10 == 0:
@@ -369,9 +374,11 @@ for ep in range(1, cfg["TOTAL_EPISODES"] + 1):
         model.save_pretrained(ckpt_path)
         tokenizer.save_pretrained(ckpt_path)
         import json as _json
+        # mean_r is only defined on ep%10==0 episodes; use ep_reward as safe fallback
+        _mean_r = mean_r if "mean_r" in dir() else ep_reward
         with open(f"{ckpt_path}/checkpoint_info.json", "w") as cf:
-            _json.dump({"episode": ep, "mean_reward": mean_r}, cf)
-        print(f"  [CKPT] Saved checkpoint → {ckpt_path}")
+            _json.dump({"episode": ep, "mean_reward": _mean_r}, cf)
+        print(f"  [CKPT] Saved checkpoint -> {ckpt_path}")
 
 log_f.close(); score_f.close()
 session_tracker.end_session()
