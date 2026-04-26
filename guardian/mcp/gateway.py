@@ -172,6 +172,20 @@ ATTACK_MCP_ROUTING: Dict[str, Dict] = {
         "audit_level": "CRITICAL",   # Sev-1
         "description": "Rogue AI auto-post → quarantine agent, revert IAM, post incident RCA",
     },
+    "delayed_exfiltration": {
+        "primary": "iam-control",
+        "secondary": "audit-log",
+        "ir_action": "temporal_correlation_block",
+        "audit_level": "HIGH",
+        "description": "Slow multi-step exfiltration → blocked based on cross-step temporal correlation",
+    },
+    "social_engineering": {
+        "primary": "security-ops",
+        "secondary": "audit-log",
+        "ir_action": "flag_social_engineering",
+        "audit_level": "HIGH",
+        "description": "Email-based social engineering workflow → flagged for security-ops review",
+    },
     # Default for unknown/clean
     "clean": {
         "primary": "audit-log",

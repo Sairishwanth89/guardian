@@ -227,6 +227,34 @@ os.makedirs("outputs/checkpoints", exist_ok=True)
 
 # ── Training loop ───────────────────────────────────
 all_samples  = []
+
+# [HITL INJECTION] Load Human-in-the-Loop offline corrections
+print("\nLoading HITL Human Corrections...")
+hitl_samples = []
+if os.path.exists("guardian/data/hitl_replay.jsonl"):
+    with open("guardian/data/hitl_replay.jsonl", "r") as f:
+        for line in f:
+            if not line.strip(): continue
+            record = json.loads(line)
+            if record.get("version") == "1.0":
+                inp = record["input"]
+                intervention = record["training_label"].split(":")[-1]
+                
+                # Reconstruct prompt (match Guardian training exactly)
+                action_log = [{"step": 1, "tool": inp.get("tool_name"), "parameters": inp.get("tool_arguments", {})}]
+                prompt = guardian.build_training_prompt(action_log)
+                
+                # Build golden HITL completion
+                completion = (
+                    f"<reasoning>HITL Override: {record.get('counterfactual', 'Anomaly detected')}</reasoning>\n"
+                    f"<risk_score>{max(record.get('risk_score', 0.8), 0.75):.2f}</risk_score>\n"
+                    f"<intervention>{intervention}</intervention>\n"
+                    f"<attack_type>{inp.get('classified_attack', 'unknown')}</attack_type>\n"
+                    f"<explanation>Human-in-the-loop escalation override.</explanation>"
+                )
+                hitl_samples.append({"prompt": prompt, "completion": completion})
+print(f"Loaded {len(hitl_samples)} HITL corrections to bootstrap GRPO learning.")
+
 log_f        = open(cfg["LOG_FILE"], "a")
 score_f      = open(cfg["SCORECARD_FILE"], "a")
 
@@ -262,8 +290,12 @@ for ep in range(1, cfg["TOTAL_EPISODES"] + 1):
         result.production_intact,
     )
 
-    # Collect training samples
+    # Collect training samples (mix in HITL data for behavioral cloning)
     all_samples.extend(result.training_samples)
+    if hitl_samples:
+        import random
+        # Inject up to 2 random HITL samples per episode to prevent catastrophic forgetting
+        all_samples.extend(random.sample(hitl_samples, min(2, len(hitl_samples))))
 
     # Console progress
     if ep % 10 == 0:
