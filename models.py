@@ -33,7 +33,9 @@ VALID_ATTACK_TYPES: List[str] = [
     "authority_spoofing", "prompt_injection", "approval_bypass",
     "data_exfiltration", "confused_deputy", "approval_laundering",
     "salami_slicing", "schema_drift_exploit",
-    "rogue_internal_ai",  # March 2026 Meta Sev-1 incident
+    "rogue_internal_ai",       # March 2026 Meta Sev-1 incident
+    "delayed_exfiltration",    # Multi-step slow exfil
+    "social_engineering",      # Email-chain manipulation
 ]
 
 

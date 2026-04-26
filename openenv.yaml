@@ -30,7 +30,7 @@ metadata:
   max_episode_steps: 60
   reward_threshold: 0.85
   difficulty_levels: [1, 2, 3]
-  reward_components: 13
+  reward_components: 16
   attack_types:
     - authority_spoofing
     - prompt_injection
@@ -41,6 +41,8 @@ metadata:
     - salami_slicing
     - schema_drift_exploit
     - rogue_internal_ai
+    - delayed_exfiltration
+    - social_engineering
   intervention_types:
     - allow
     - rewrite
