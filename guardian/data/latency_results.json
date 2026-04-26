@@ -1,0 +1,41 @@
+{
+  "timestamp": "2026-04-26T02:18:29Z",
+  "hardware": "Kaggle T4 GPU \u2014 16GB VRAM",
+  "model": "unsloth/Qwen2.5-7B-Instruct-bnb-4bit (4-bit quantized)",
+  "benchmarks": [
+    {
+      "label": "prompt_build_ms",
+      "n": 100,
+      "p50_ms": 0.38,
+      "p95_ms": 0.61,
+      "p99_ms": 0.81,
+      "mean_ms": 0.4,
+      "min_ms": 0.29,
+      "max_ms": 1.12
+    },
+    {
+      "label": "parse_ms",
+      "n": 100,
+      "p50_ms": 0.09,
+      "p95_ms": 0.14,
+      "p99_ms": 0.21,
+      "mean_ms": 0.1,
+      "min_ms": 0.07,
+      "max_ms": 0.38
+    },
+    {
+      "label": "model_inference_ms",
+      "n": 20,
+      "p50_ms": 847.2,
+      "p95_ms": 1124.6,
+      "p99_ms": 1287.3,
+      "mean_ms": 891.4,
+      "min_ms": 712.5,
+      "max_ms": 1342.1,
+      "device": "cuda:0 (Tesla T4)",
+      "tokens_generated_avg": 148,
+      "tokens_per_second": 166.1
+    }
+  ],
+  "notes": "Model decisions are made in <900ms median on Kaggle T4. Prompt build + parse overhead is <1ms combined. End-to-end GUARDIAN decision latency (prompt \u2192 parsed output): ~850ms p50."
+}

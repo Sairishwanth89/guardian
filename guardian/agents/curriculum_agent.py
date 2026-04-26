@@ -43,6 +43,11 @@ class UCBAttackSelector:
             "data_exfiltration",
             "confused_deputy",
             "approval_laundering",
+            "salami_slicing",
+            "schema_drift_exploit",
+            "rogue_internal_ai",
+            "delayed_exfiltration",
+            "social_engineering",
         ]
         self._counts: Dict[str, int] = defaultdict(int)
         self._rewards: Dict[str, float] = defaultdict(float)

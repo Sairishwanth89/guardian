@@ -1,5 +1,5 @@
 {
-  "name": "GUARDIAN HITL Decision Router",
+  "name": "GUARDIAN HITL — Alert + Text Decision",
   "nodes": [
     {
       "parameters": {
@@ -8,68 +8,47 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "node-webhook-alert",
+      "id": "node-alert-webhook",
       "name": "Guardian Alert Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
-      "position": [240, 300],
+      "position": [240, 200],
       "webhookId": "guardian-alert-00001"
     },
+
     {
       "parameters": {
-        "values": {
-          "string": [
-            {
-              "name": "telegram_message",
-              "value": "=🚨 *GUARDIAN — Gray Zone Escalation*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Domain:* {{ $json.body.domain.toUpperCase() }}\n*Tool Blocked:* `{{ $json.body.tool_name }}()`\n*Anomaly Type:* {{ $json.body.classified_attack }}\n*Capability Tags:* `{{ $json.body.capability_tags }}`\n*Risk Score:* {{ ($json.body.risk_score * 100).toFixed(0) }}% ⚠️\n\n*Counterfactual:*\n_{{ $json.body.counterfactual }}_\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Context ID:* `{{ $json.body.context_id }}`\nStep {{ $json.body.episode_step }} | Awaiting your decision:"
-            },
-            {
-              "name": "context_id",
-              "value": "={{ $json.body.context_id }}"
-            }
-          ]
-        }
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ chat_id: $vars.TELEGRAM_CHAT_ID, text: 'GUARDIAN ALERT\\n--------------------\\nDomain: ' + $json.body.domain + '\\nTool: ' + $json.body.tool_name + '()\\nAttack: ' + $json.body.classified_attack + '\\nRisk: ' + ($json.body.risk_score * 100).toFixed(0) + '%\\n\\nBlast Radius:\\n' + $json.body.counterfactual + '\\n--------------------\\nContext ID: ' + $json.body.context_id + '\\n\\nReply with:\\n  block ' + $json.body.context_id + '\\n  allow ' + $json.body.context_id + '\\n  shadow ' + $json.body.context_id }) }}"
       },
-      "id": "node-set-message",
-      "name": "Format Alert Message",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 1,
-      "position": [460, 300]
+      "id": "node-send-alert",
+      "name": "Send Alert to Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [480, 200]
     },
-    {
-      "parameters": {
-        "resource": "message",
-        "operation": "sendMessage",
-        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
-        "text": "={{ $json.telegram_message }}",
-        "additionalFields": {
-          "parse_mode": "Markdown",
-          "reply_markup": "={{ JSON.stringify({ inline_keyboard: [[ { text: '✅ ALLOW (Execute in Production)', callback_data: 'allow|' + $json.context_id }, { text: '🚫 BLOCK (Terminate Agent)', callback_data: 'block|' + $json.context_id }, { text: '👁️ SHADOW (Route to Honeypot)', callback_data: 'shadow|' + $json.context_id } ]] }) }}"
-        }
-      },
-      "id": "node-telegram-send",
-      "name": "Send Telegram Alert",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1,
-      "position": [680, 300],
-      "credentials": {
-        "telegramApi": {
-          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
-          "name": "Guardian Telegram Bot"
-        }
-      }
-    },
+
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={ \"status\": \"escalation_received\", \"context_id\": \"{{ $('Format Alert Message').item.json.context_id }}\" }"
+        "responseBody": "={ \"status\": \"alert_sent\" }",
+        "options": {}
       },
-      "id": "node-webhook-response",
-      "name": "Acknowledge to Guardian",
+      "id": "node-alert-ack",
+      "name": "Ack Alert to Guardian",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [900, 300]
+      "position": [720, 200]
     },
+
     {
       "parameters": {
         "httpMethod": "POST",
@@ -77,206 +56,89 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "node-telegram-callback",
-      "name": "Telegram Button Callback",
+      "id": "ed6aba6d-e155-4632-8b38-132d37bdfc9c",
+      "name": "Telegram Message Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
-      "position": [240, 580],
+      "position": [240, 500],
       "webhookId": "telegram-callback-00002"
     },
-    {
-      "parameters": {
-        "values": {
-          "string": [
-            {
-              "name": "decision",
-              "value": "={{ $json.body.callback_query.data.split('|')[0] }}"
-            },
-            {
-              "name": "context_id",
-              "value": "={{ $json.body.callback_query.data.split('|')[1] }}"
-            }
-          ]
-        }
-      },
-      "id": "node-parse-callback",
-      "name": "Parse Decision",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 1,
-      "position": [460, 580]
-    },
+
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.GUARDIAN_SERVER_URL }}/hitl/decision",
+        "url": "http://host.docker.internal:8000/hitl/decision",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
+            { "name": "Content-Type", "value": "application/json" }
           ]
         },
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "context_id",
-              "value": "={{ $json.context_id }}"
-            },
-            {
-              "name": "decision",
-              "value": "={{ $json.decision }}"
-            }
-          ]
-        }
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ text: $json.body.message.text }) }}"
       },
       "id": "node-post-decision",
-      "name": "POST Decision to Guardian",
+      "name": "POST to Guardian",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 3,
-      "position": [680, 580]
+      "position": [480, 500]
     },
+
     {
       "parameters": {
-        "resource": "message",
-        "operation": "sendMessage",
-        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
-        "text": "=✅ Decision submitted to GUARDIAN\n*Decision:* {{ $('Parse Decision').item.json.decision.toUpperCase() }}\n*Context:* `{{ $('Parse Decision').item.json.context_id }}`",
-        "additionalFields": {
-          "parse_mode": "Markdown"
-        }
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ chat_id: $vars.TELEGRAM_CHAT_ID, text: 'Logged to GUARDIAN\\n' + $('Telegram Message Webhook').item.json.body.message.text }) }}"
       },
-      "id": "node-confirm-telegram",
+      "id": "node-confirm",
       "name": "Confirm to User",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1,
-      "position": [900, 580],
-      "credentials": {
-        "telegramApi": {
-          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
-          "name": "Guardian Telegram Bot"
-        }
-      }
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [720, 500]
     },
+
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={ \"ok\": true }"
+        "responseBody": "={ \"ok\": true }",
+        "options": {}
       },
-      "id": "node-telegram-ack",
-      "name": "Ack Telegram Callback",
+      "id": "8dce46f5-878b-44af-958e-8cb222cb61ac",
+      "name": "Ack Telegram",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [1120, 580]
+      "position": [960, 500]
     }
   ],
   "connections": {
     "Guardian Alert Webhook": {
-      "main": [
-        [
-          {
-            "node": "Format Alert Message",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Send Alert to Telegram", "type": "main", "index": 0 }]]
     },
-    "Format Alert Message": {
-      "main": [
-        [
-          {
-            "node": "Send Telegram Alert",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Send Alert to Telegram": {
+      "main": [[{ "node": "Ack Alert to Guardian", "type": "main", "index": 0 }]]
     },
-    "Send Telegram Alert": {
-      "main": [
-        [
-          {
-            "node": "Acknowledge to Guardian",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Telegram Message Webhook": {
+      "main": [[{ "node": "POST to Guardian", "type": "main", "index": 0 }]]
     },
-    "Telegram Button Callback": {
-      "main": [
-        [
-          {
-            "node": "Parse Decision",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse Decision": {
-      "main": [
-        [
-          {
-            "node": "POST Decision to Guardian",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "POST Decision to Guardian": {
-      "main": [
-        [
-          {
-            "node": "Confirm to User",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "POST to Guardian": {
+      "main": [[{ "node": "Confirm to User", "type": "main", "index": 0 }]]
     },
     "Confirm to User": {
-      "main": [
-        [
-          {
-            "node": "Ack Telegram Callback",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Ack Telegram", "type": "main", "index": 0 }]]
     }
   },
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "_guardian_setup_notes": {
-    "STEP_1_VARIABLES": {
-      "description": "Add these two variables in n8n Settings > Variables",
-      "GUARDIAN_SERVER_URL": "http://host.docker.internal:8000",
-      "TELEGRAM_CHAT_ID": "YOUR_TELEGRAM_CHAT_ID (get from @userinfobot)"
-    },
-    "STEP_2_TELEGRAM_BOT": {
-      "description": "Create a Telegram bot via @BotFather, copy the token, add it as a credential named 'Guardian Telegram Bot'",
-      "bot_command": "Message @BotFather on Telegram, type /newbot"
-    },
-    "STEP_3_TELEGRAM_WEBHOOK": {
-      "description": "Register your Telegram bot to forward callback_query to n8n's webhook",
-      "command": "curl -X POST https://api.telegram.org/bot<BOT_TOKEN>/setWebhook -d 'url=http://YOUR_N8N_URL/webhook/telegram-callback'"
-    },
-    "STEP_4_GUARDIAN_ENV_VAR": {
-      "description": "Set this env var in your Guardian server .env file so the server knows to notify n8n",
-      "N8N_WEBHOOK_URL": "http://localhost:5678/webhook/guardian-alert"
-    },
-    "OPENCLAW_COMPATIBILITY": {
-      "description": "OpenClaw uses the same Guardian REST API. Configure OpenClaw to poll GET /hitl/pending every 10s and POST /hitl/decision with the same body format.",
-      "poll_endpoint": "GET http://localhost:8000/hitl/pending",
-      "decision_endpoint": "POST http://localhost:8000/hitl/decision",
-      "decision_body": {"context_id": "STRING", "decision": "allow | block | shadow"}
-    }
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9a61ab123bc53787c93c9804e933a405ae1c8687079479868827453b768052e3"
   }
 }

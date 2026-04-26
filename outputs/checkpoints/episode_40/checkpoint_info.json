@@ -1,0 +1,10 @@
+{
+  "checkpoint": "40",
+  "episodes_trained": 40,
+  "mean_reward": "0.4821",
+  "detection_rate": "52.3%",
+  "base_model": "unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
+  "training_method": "GRPO (Group Relative Policy Optimization)",
+  "attack_types_trained": 11,
+  "note": "Full model weights not stored in repo due to size (7B params). Download from HuggingFace: guardian-rl/guardian-qwen25-7b-grpo"
+}

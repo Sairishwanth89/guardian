@@ -329,6 +329,66 @@ def hitl_pending() -> Dict[str, Any]:
 
 
 @app.post(
+    "/hitl/escalate",
+    summary="Create a new HITL escalation from the Web UI and fire n8n webhook",
+    tags=["HITL"],
+)
+def hitl_escalate(body: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Called by the SOC War Room UI when a Gray-Zone risk is detected.
+    1. Registers the escalation in the HITL manager (so resolve works later).
+    2. Fires the n8n webhook to trigger the Telegram alert.
+    """
+    import requests as _req
+    if not _HITL_AVAILABLE:
+        return {"error": "HITL module not available"}
+
+    context_id    = body.get("context_id", f"demo-{os.urandom(4).hex()}")
+    tool_name     = body.get("tool_name", "unknown_tool")
+    risk_score    = float(body.get("risk_score", 0.65))
+    domain        = body.get("domain", "enterprise")
+    classified    = body.get("classified_attack", "ambiguous_behavior")
+    cap_tags      = body.get("capability_tags", "")
+    counterfactual = body.get("counterfactual", "")
+    tool_args     = body.get("tool_arguments", {})
+
+    # Register full escalation in the manager so /hitl/decision can resolve it
+    ctx = hitl_manager.create_escalation(
+        tool_name=tool_name,
+        tool_arguments=tool_args,
+        risk_score=risk_score,
+        classified_attack=classified,
+        capability_tags=cap_tags,
+        counterfactual=counterfactual,
+        domain=domain,
+        episode_id=body.get("episode_id", "demo"),
+    )
+    # The manager auto-generates the context_id; read it back
+    real_ctx_id = ctx.context_id
+
+    payload = {
+        "context_id": real_ctx_id,
+        "tool_name": tool_name,
+        "risk_score": risk_score,
+        "domain": domain,
+        "classified_attack": classified,
+        "capability_tags": cap_tags,
+        "counterfactual": counterfactual,
+    }
+    try:
+        _req.post(
+            "http://localhost:5678/webhook-test/guardian-alert",
+            json=payload,
+            timeout=2,
+        )
+        log.info("[HITL] n8n webhook triggered for context_id=%s", real_ctx_id)
+    except Exception as e:
+        log.warning("[HITL] n8n webhook ping failed: %s", e)
+
+    return {"ok": True, "context_id": real_ctx_id}
+
+
+@app.post(
     "/hitl/decision",
     summary="Submit human HITL decision",
     tags=["HITL"],
@@ -340,41 +400,94 @@ def hitl_decision(body: Dict[str, Any]) -> Dict[str, Any]:
     Body:
         {"context_id": "abc123", "decision": "allow" | "block" | "shadow"}
 
-    The decision is:
-      1. Executed by the MCP Gateway (allow/block/shadow routing)
-      2. Logged to the HITL Replay Buffer (hitl_replay.jsonl)
-      3. The replay buffer is used by the next GRPO training run as Ground Truth
+    Also supports plain text format from Telegram:
+        {"text": "block abc123"}   ← user typed it instead of tapping button
+
+    The decision is ALWAYS written to hitl_replay.jsonl regardless of whether
+    the context_id is still in memory. This closes the self-improvement loop
+    even after server restarts.
     """
     if not _HITL_AVAILABLE:
         return {"error": "HITL module not available"}
 
-    context_id = body.get("context_id", "")
-    decision = body.get("decision", "")
+    # ── Support typed text commands ("block abc123" / "allow" / "shadow abc123")
+    raw_text = body.get("text", "").strip().lower()
+    if raw_text:
+        parts = raw_text.split()
+        if parts[0] in ("allow", "block", "shadow"):
+            body["decision"] = parts[0]
+            if len(parts) > 1:
+                body["context_id"] = parts[1]
+
+    context_id = body.get("context_id", f"manual-{os.urandom(3).hex()}")
+    decision   = body.get("decision", "")
 
     if decision not in ("allow", "block", "shadow"):
         return {"error": f"Invalid decision '{decision}'. Must be: allow | block | shadow"}
 
+    # ── Try to resolve from in-memory pending queue first
     ctx = hitl_manager.resolve_escalation(context_id, decision)  # type: ignore
-    if ctx is None:
-        return {"error": f"Unknown or already-resolved context_id '{context_id}'"}
 
+    if ctx is None:
+        # Context not in memory (server restarted, or manual submission)
+        # Write a headless entry directly to the replay buffer — loop stays closed
+        log.warning(
+            "[HITL] context_id '%s' not in memory — writing headless replay entry", context_id
+        )
+        import datetime, json as _json
+        replay_path = hitl_manager._replay_path
+        os.makedirs(os.path.dirname(replay_path), exist_ok=True)
+        headless_entry = {
+            "context_id":             context_id,
+            "timestamp":              datetime.datetime.utcnow().isoformat(),
+            "tool_name":              body.get("tool_name", "unknown"),
+            "classified_attack":      body.get("classified_attack", "unknown"),
+            "risk_score":             body.get("risk_score", 0.65),
+            "domain":                 body.get("domain", "enterprise"),
+            "ground_truth_decision":  decision,
+            "training_label":         f"intervention:{decision}",
+            "source":                 "headless_manual",
+        }
+        try:
+            with open(replay_path, "a", encoding="utf-8") as f:
+                f.write(_json.dumps(headless_entry) + "\n")
+            log.info("[HITL] 📝 Headless replay entry written for context_id=%s", context_id)
+        except OSError as e:
+            log.error("[HITL] Failed to write headless replay: %s", e)
+            return {"error": f"Replay write failed: {e}"}
+
+        stats = hitl_manager.get_replay_buffer_stats()
+        return {
+            "resolved":            True,
+            "context_id":          context_id,
+            "decision":            decision,
+            "source":              "headless_manual",
+            "replay_buffer_total": stats["total_entries"],
+            "message":             (
+                f"Decision '{decision}' written to replay buffer (headless). "
+                f"Buffer now has {stats['total_entries']} ground-truth entries."
+            ),
+        }
+
+    # ── Normal path: context was in memory, fully resolved
     stats = hitl_manager.get_replay_buffer_stats()
     log.info(
         "[HITL] Human decision: context_id=%s decision=%s replay_total=%d",
         context_id, decision, stats["total_entries"]
     )
     return {
-        "resolved": True,
-        "context_id": context_id,
-        "decision": decision,
-        "tool_name": ctx.tool_name,
+        "resolved":            True,
+        "context_id":          context_id,
+        "decision":            decision,
+        "tool_name":           ctx.tool_name,
         "replay_buffer_total": stats["total_entries"],
-        "message": (
+        "message":             (
             f"Decision '{decision}' logged. "
             f"Replay buffer now has {stats['total_entries']} ground-truth entries "
             f"for next GRPO training run."
         ),
     }
+
 
 
 @app.get(
@@ -992,6 +1105,26 @@ _WEB_UI_HTML = r"""<!DOCTYPE html>
       document.getElementById('hitlOverlay').classList.add('active');
       updateGauge(risk);
       addLog('⚠️ HITL Escalation', `Gray-zone risk (${pct}%) — execution FROZEN. Awaiting human decision.`, null, 'hitl');
+      
+      // 📡 PING THE BACKEND -> TRIGGERS n8n WEBHOOK OVER TELEGRAM
+      // Use the real server-generated context_id so /hitl/decision can resolve it
+      fetch('/hitl/escalate', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          risk_score: risk,
+          tool_name: tool,
+          counterfactual: cf,          
+          tool_arguments: {}, 
+          domain: currentDomain,
+          classified_attack: document.getElementById('attack_type').value || 'ambiguous_behavior',
+          capability_tags: tags
+        })
+      }).then(r => r.json()).then(data => {
+        if (data.context_id) {
+          pendingCtxId = data.context_id;  // ✅ Override with real server UUID
+          document.getElementById('hitlCtxId').textContent = pendingCtxId;
+        }
+      }).catch(e => console.error(e));
     }
     function simulateHITL(){
       const tools = ['override_margin_limits','modify_iam_policy','data_exfiltration','write_db'];

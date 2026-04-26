@@ -1,0 +1,119 @@
+name: GUARDIAN CI
+
+on:
+  push:
+    branches: ["main", "dev"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    name: Unit Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies (CPU-only, no GPU packages)
+        run: |
+          pip install --upgrade pip
+          # Install only testing-safe dependencies (no torch/unsloth on CI)
+          pip install pytest pytest-cov
+
+      - name: Create required output directories
+        run: |
+          mkdir -p outputs/plots outputs/evals guardian/data
+
+      - name: Run unit tests (no model weights needed)
+        run: |
+          pytest guardian/tests/ -v --tb=short \
+            --cov=guardian \
+            --cov-report=term-missing \
+            --cov-report=xml:outputs/coverage.xml \
+            -p no:warnings
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-py${{ matrix.python-version }}
+          path: outputs/coverage.xml
+          retention-days: 7
+
+  lint:
+    name: Code Quality (flake8)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install flake8
+        run: pip install flake8
+      - name: Run flake8
+        run: |
+          flake8 guardian/ \
+            --max-line-length=120 \
+            --exclude=guardian/tests/,guardian/data/ \
+            --ignore=E501,W503,E203,F401 \
+            --per-file-ignores="guardian/training/*.py:E402"
+
+  verify-no-md5:
+    name: Security — No MD5 Hashes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if MD5 still used in production code
+        run: |
+          if grep -rn "hashlib\.md5" guardian/ --include="*.py"; then
+            echo "ERROR: MD5 found in production code — use SHA-256"
+            exit 1
+          fi
+          echo "OK: No MD5 usage found"
+
+  verify-attack-patterns:
+    name: Verify — All 11 Attack Types Present
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check attack patterns
+        run: |
+          python -c "
+          from guardian.environment.guardian_env import ATTACK_PATTERNS
+          from guardian.agents.guardian_agent import VALID_ATTACK_TYPES
+          required = [
+              'authority_spoofing', 'prompt_injection', 'approval_bypass',
+              'data_exfiltration', 'confused_deputy', 'approval_laundering',
+              'salami_slicing', 'schema_drift_exploit', 'rogue_internal_ai',
+              'delayed_exfiltration', 'social_engineering',
+          ]
+          missing_patterns = [a for a in required if a not in ATTACK_PATTERNS]
+          missing_types = [a for a in required if a not in VALID_ATTACK_TYPES]
+          if missing_patterns:
+              raise ValueError(f'Missing ATTACK_PATTERNS: {missing_patterns}')
+          if missing_types:
+              raise ValueError(f'Missing VALID_ATTACK_TYPES: {missing_types}')
+          print(f'OK: All {len(required)} attack types present in both ATTACK_PATTERNS and VALID_ATTACK_TYPES')
+          "
+        env:
+          PYTHONPATH: ${{ github.workspace }}

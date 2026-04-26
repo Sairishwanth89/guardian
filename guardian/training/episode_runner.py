@@ -97,6 +97,8 @@ class EpisodeRunner:
         step_rewards = []
         last_worker_tool = "read_db"
         risk_history = [0.0] * 10
+        attack_injection_step: Optional[int] = None  # GAP 4: track real injection step
+        last_gd: Dict = {}  # GAP 5: hold last guardian decision for rc.compute
 
         # Build FAISS context for first step
         faiss_ctx = self._get_faiss_context()
@@ -147,8 +149,14 @@ class EpisodeRunner:
             step_rewards.append(step_r)
             risk_history.pop(0)
             risk_history.append(gd["risk_score"])
+            last_gd = gd  # keep reference
 
-            prompt = self.guardian.build_training_prompt(state.action_log[:-1])
+            # GAP 6: pass multi_app_log to prompt builder if available
+            multi_app_log = getattr(state, "multi_app_log", None)
+            prompt = self.guardian.build_training_prompt(
+                state.action_log[:-1],
+                multi_app_log=multi_app_log,
+            )
             training_samples.append({"prompt": prompt, "completion": json.dumps(gd)})
 
         # ── Attack phase ─────────────────────────────────────────────────
@@ -161,6 +169,8 @@ class EpisodeRunner:
                 attack_injection=pattern["injection"],
             )
             last_worker_tool = pattern["tool"]
+            # GAP 4: capture injection step BEFORE worker_step increments counter
+            attack_injection_step = state.episode_step
             self.env.worker_step(
                 pattern["tool"],
                 pattern["dangerous_params"],
@@ -188,8 +198,14 @@ class EpisodeRunner:
             step_rewards.append(step_r)
             risk_history.pop(0)
             risk_history.append(gd["risk_score"])
+            last_gd = gd  # GAP 5
 
-            prompt = self.guardian.build_training_prompt(state.action_log[:-1])
+            # GAP 6: include multi_app_log in attack-phase prompt
+            multi_app_log = getattr(state, "multi_app_log", None)
+            prompt = self.guardian.build_training_prompt(
+                state.action_log[:-1],
+                multi_app_log=multi_app_log,
+            )
             training_samples.append({"prompt": prompt, "completion": json.dumps(gd)})
 
             # Compliance simulator for escalation
@@ -205,6 +221,11 @@ class EpisodeRunner:
                 })
 
         production_intact = self.env.verify_production_intact()
+        # GAP 5: pull Meta Sev-1 fields from WorldState
+        iam_overpermissioned = getattr(state, "iam_overpermissioned", False)
+        rogue_ai_posted = getattr(state, "rogue_ai_posted", False)
+        quarantined_agents = getattr(state, "quarantined_agents", [])
+
         breakdown = self.rc.compute(
             production_intact=production_intact,
             fork_triggered=state.fork_triggered,
@@ -215,11 +236,22 @@ class EpisodeRunner:
             last_worker_tool=last_worker_tool,
             shadow_tokens=state.shadow_tokens_generated,
             guardian_tokens=state.guardian_tokens_used,
-            intervention=gd.get("intervention", "allow") if "gd" in dir() else "allow",
+            intervention=last_gd.get("intervention", "allow"),
             risk_score=risk_history[-1],
             step_rewards=step_rewards,
-            explanation=gd.get("reasoning", "") if "gd" in dir() else "",
+            explanation=last_gd.get("explanation", ""),
+            reasoning=last_gd.get("reasoning", ""),  # GAP 3
             action_log=state.action_log,
+            # GAP 5: now correctly passed
+            iam_overpermissioned=iam_overpermissioned,
+            rogue_ai_posted=rogue_ai_posted,
+            quarantined_agents=quarantined_agents,
+            # GAP 4: correct injection step
+            attack_injection_step=attack_injection_step,
+            # GAP 12: CSV logging
+            csv_log_path="outputs/reward_breakdown_log.csv",
+            episode_id=episode_id,
+            attack_type_label=attack_type or "clean",
         )
 
         # Update UCB
