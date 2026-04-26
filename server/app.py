@@ -709,469 +709,599 @@ _WEB_UI_HTML = r"""<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GUARDIAN Fleet — SOC War Room</title>
+  <title>GUARDIAN — AI Security Oversight | OpenEnv</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
-    body {
-      font-family: 'Inter', -apple-system, system-ui, sans-serif;
-      background: radial-gradient(ellipse at top, #0d1117 0%, #030712 100%);
-      color: #f3f4f6; min-height: 100vh; padding: 20px;
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #030712;
+      --surface:   #0d1526;
+      --surface2:  #111827;
+      --border:    #1e2d45;
+      --blue:      #3b82f6;
+      --blue-glow: rgba(59,130,246,0.15);
+      --cyan:      #22d3ee;
+      --green:     #10b981;
+      --amber:     #f59e0b;
+      --red:       #ef4444;
+      --purple:    #8b5cf6;
+      --text:      #f1f5f9;
+      --muted:     #64748b;
+      --mono:      'JetBrains Mono', monospace;
     }
-    .header {
-      display: flex; justify-content: space-between; align-items: center;
-      margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #1f2937;
+
+    html { scroll-behavior: smooth; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }
+
+    /* ── ORBS ── */
+    .orb { position: fixed; border-radius: 50%; filter: blur(120px); opacity: 0.18; pointer-events: none; z-index: 0; animation: drift 12s ease-in-out infinite; }
+    .orb-1 { width: 600px; height: 600px; background: var(--blue);   top: -200px; left: -100px; animation-delay: 0s; }
+    .orb-2 { width: 400px; height: 400px; background: var(--purple); bottom: 0;   right: -100px; animation-delay: 4s; }
+    .orb-3 { width: 300px; height: 300px; background: var(--cyan);   top: 40%;   left: 50%;  animation-delay: 8s; }
+    @keyframes drift { 0%,100%{transform:translate(0,0)} 50%{transform:translate(30px,20px)} }
+
+    /* ── NAV ── */
+    nav { position: sticky; top: 0; z-index: 100; backdrop-filter: blur(20px); background: rgba(3,7,18,0.7); border-bottom: 1px solid var(--border); padding: 0 40px; display: flex; align-items: center; justify-content: space-between; height: 60px; }
+    .nav-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1rem; color: var(--text); }
+    .nav-logo .shield { width: 28px; height: 28px; background: linear-gradient(135deg, var(--blue), var(--cyan)); border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+    .nav-pill { font-size: 0.7rem; font-weight: 700; padding: 3px 9px; border-radius: 20px; background: rgba(59,130,246,0.12); color: var(--blue); border: 1px solid rgba(59,130,246,0.25); letter-spacing: 0.05em; }
+    .nav-links { display: flex; gap: 6px; }
+    .nav-links a { padding: 6px 14px; border-radius: 7px; font-size: 0.82rem; font-weight: 500; color: var(--muted); text-decoration: none; transition: all 0.2s; }
+    .nav-links a:hover { background: var(--surface); color: var(--text); }
+    .nav-links a.active { background: var(--blue-glow); color: var(--blue); }
+    .pulse-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite; display: inline-block; margin-right: 6px; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.4)} }
+
+    /* ── HERO ── */
+    .hero { position: relative; z-index: 1; padding: 90px 40px 70px; max-width: 1200px; margin: 0 auto; }
+    .hero-tag { display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px; border-radius: 100px; border: 1px solid var(--border); background: var(--surface); font-size: 0.75rem; color: var(--muted); font-family: var(--mono); margin-bottom: 28px; }
+    .hero h1 { font-size: clamp(2.2rem, 5vw, 3.8rem); font-weight: 800; line-height: 1.1; letter-spacing: -0.03em; margin-bottom: 22px; }
+    .hero h1 .grad { background: linear-gradient(135deg, #60a5fa 0%, #22d3ee 50%, #a78bfa 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .hero-sub { font-size: 1.1rem; color: var(--muted); line-height: 1.7; max-width: 640px; margin-bottom: 40px; }
+    .hero-cta { display: flex; gap: 12px; flex-wrap: wrap; }
+    .btn { padding: 12px 24px; border-radius: 10px; font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: all 0.2s; border: none; font-family: 'Inter', sans-serif; }
+    .btn-primary { background: var(--blue); color: white; box-shadow: 0 4px 20px rgba(59,130,246,0.3); }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(59,130,246,0.4); }
+    .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: var(--surface); color: var(--text); }
+
+    /* ── STATS ROW ── */
+    .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; max-width:1200px; margin: 0 auto 60px; padding: 0 40px; position: relative; z-index: 1; }
+    .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px; transition: border-color 0.2s; }
+    .stat-card:hover { border-color: var(--blue); }
+    .stat-num { font-size: 2rem; font-weight: 800; letter-spacing: -0.03em; }
+    .stat-label { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+    .stat-blue   { color: var(--blue); }
+    .stat-green  { color: var(--green); }
+    .stat-amber  { color: var(--amber); }
+    .stat-purple { color: var(--purple); }
+
+    /* ── PILLARS ── */
+    .section { max-width: 1200px; margin: 0 auto 60px; padding: 0 40px; position: relative; z-index: 1; }
+    .section-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--blue); margin-bottom: 10px; }
+    .section-title { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 10px; }
+    .section-sub { color: var(--muted); font-size: 0.95rem; line-height: 1.6; max-width: 560px; margin-bottom: 32px; }
+    .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .pillar { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; transition: all 0.2s; }
+    .pillar:hover { border-color: var(--blue); transform: translateY(-2px); }
+    .pillar-icon { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; margin-bottom: 14px; }
+    .pi-blue   { background: rgba(59,130,246,0.12); }
+    .pi-green  { background: rgba(16,185,129,0.12); }
+    .pi-purple { background: rgba(139,92,246,0.12); }
+    .pi-amber  { background: rgba(245,158,11,0.12); }
+    .pi-cyan   { background: rgba(34,211,238,0.12); }
+    .pi-red    { background: rgba(239,68,68,0.12);  }
+    .pillar h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 8px; }
+    .pillar p  { font-size: 0.82rem; color: var(--muted); line-height: 1.6; }
+
+    /* ── ATTACK CHIPS ── */
+    .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+    .chip { padding: 5px 12px; border-radius: 100px; font-size: 0.72rem; font-weight: 600; font-family: var(--mono); border: 1px solid; }
+    .chip-red    { color: #f87171; border-color: rgba(239,68,68,0.3);   background: rgba(239,68,68,0.06); }
+    .chip-amber  { color: #fbbf24; border-color: rgba(245,158,11,0.3); background: rgba(245,158,11,0.06); }
+    .chip-purple { color: #a78bfa; border-color: rgba(139,92,246,0.3); background: rgba(139,92,246,0.06); }
+
+    /* ── DIVIDER ── */
+    .divider { border: none; border-top: 1px solid var(--border); max-width: 1200px; margin: 0 auto 60px; }
+
+    /* ── WAR ROOM ── */
+    .war-room { max-width: 1200px; margin: 0 auto; padding: 0 40px 60px; position: relative; z-index: 1; }
+    .war-room-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .war-room-title { display: flex; align-items: center; gap: 12px; }
+    .war-room-title h2 { font-size: 1.3rem; font-weight: 700; }
+    .gateway-badge { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 100px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.25); color: var(--green); font-size: 0.72rem; font-weight: 600; }
+
+    .wr-grid { display: grid; grid-template-columns: 1fr 340px; gap: 16px; }
+    .wr-left { display: flex; flex-direction: column; gap: 16px; }
+    .wr-right { display: flex; flex-direction: column; gap: 16px; }
+
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+    .card-hd { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .card-hd-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+    .card-body { padding: 18px; }
+
+    /* controls */
+    .ctrl-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+    label.ctrl-label { font-size: 0.7rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; display: block; margin-bottom: 6px; }
+    select.ctrl-sel, input[type=range] { width: 100%; }
+    select.ctrl-sel { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 0.82rem; outline: none; cursor: pointer; transition: border-color 0.2s; }
+    select.ctrl-sel:hover, select.ctrl-sel:focus { border-color: var(--blue); }
+    .risk-row { margin-bottom: 14px; }
+    .risk-display { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+    .risk-val { font-size: 1.4rem; font-weight: 800; font-family: var(--mono); color: var(--blue); }
+    input[type=range] { -webkit-appearance: none; height: 6px; border-radius: 3px; background: var(--border); outline: none; margin: 0; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--blue); cursor: pointer; box-shadow: 0 0 10px rgba(59,130,246,0.5); }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn-sm { padding: 9px 16px; border-radius: 8px; font-size: 0.8rem; font-weight: 600; cursor: pointer; border: none; font-family: 'Inter', sans-serif; transition: all 0.18s; }
+    .btn-run   { background: var(--blue);  color: #fff; flex: 1; }
+    .btn-run:hover { opacity: 0.85; }
+    .btn-reset { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+    .btn-reset:hover { color: var(--text); border-color: var(--text); }
+    .btn-clear { background: rgba(239,68,68,0.08); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
+
+    /* status badges */
+    .sb-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .sb { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+    .sb-green  { background: rgba(16,185,129,0.1);  color: var(--green);  border: 1px solid rgba(16,185,129,0.25); }
+    .sb-red    { background: rgba(239,68,68,0.1);   color: #f87171;       border: 1px solid rgba(239,68,68,0.25); }
+    .sb-amber  { background: rgba(245,158,11,0.1);  color: var(--amber);  border: 1px solid rgba(245,158,11,0.25); }
+    .sb-blue   { background: rgba(59,130,246,0.1);  color: var(--blue);   border: 1px solid rgba(59,130,246,0.25); }
+    .sb-purple { background: rgba(139,92,246,0.1);  color: #a78bfa;       border: 1px solid rgba(139,92,246,0.25); }
+    .sb-dot    { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+    /* feed */
+    .feed { font-family: var(--mono); font-size: 0.75rem; max-height: 240px; overflow-y: auto; background: #07111f; border-radius: 8px; padding: 12px; }
+    .feed::-webkit-scrollbar { width: 4px; }
+    .feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .feed-line { padding: 4px 0; border-bottom: 1px solid rgba(30,45,69,0.5); line-height: 1.5; word-break: break-all; }
+    .feed-line:last-child { border-bottom: none; }
+    .f-ts  { color: var(--muted); margin-right: 8px; }
+    .f-ok  { color: var(--green); }
+    .f-bad { color: #f87171; }
+    .f-warn{ color: var(--amber); }
+    .f-info{ color: var(--blue); }
+    .f-sys { color: var(--purple); }
+    .feed-empty { color: var(--muted); font-style: italic; padding: 20px 0; text-align: center; }
+
+    /* gauge */
+    .gauge-wrap { display: flex; flex-direction: column; align-items: center; padding: 18px 0 8px; }
+    .gauge-svg { transform: rotate(-90deg); }
+    .gauge-track { fill: none; stroke: var(--border); stroke-width: 10; }
+    .gauge-fill  { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset 0.6s cubic-bezier(.4,0,.2,1), stroke 0.4s; }
+    .gauge-center { margin-top: -10px; text-align: center; }
+    .gauge-pct  { font-size: 2rem; font-weight: 800; font-family: var(--mono); }
+    .gauge-lbl  { font-size: 0.72rem; color: var(--muted); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.08em; }
+
+    /* reward */
+    .reward-row { display: flex; justify-content: space-between; align-items: baseline; }
+    .reward-val { font-size: 1.6rem; font-weight: 800; font-family: var(--mono); color: var(--cyan); }
+    .reward-label { font-size: 0.72rem; color: var(--muted); }
+    .mini-bars { display: flex; align-items: flex-end; gap: 3px; height: 36px; margin-top: 12px; }
+    .mini-bar  { flex: 1; border-radius: 3px 3px 0 0; background: var(--blue); opacity: 0.6; transition: height 0.4s; min-height: 4px; }
+
+    /* obs panel */
+    .obs-pre { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow-y: auto; }
+
+    /* episode end toast */
+    #episodeToast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--green); border-radius: 12px; padding: 14px 20px; display: none; z-index: 999; box-shadow: 0 8px 30px rgba(0,0,0,0.5); font-size: 0.85rem; max-width: 300px; }
+    #episodeToast.show { display: block; animation: slideUp 0.3s ease; }
+    @keyframes slideUp { from{transform:translateY(20px);opacity:0} to{transform:translateY(0);opacity:1} }
+
+    /* responsive */
+    @media(max-width:900px){
+      .wr-grid { grid-template-columns: 1fr; }
+      .stats-row { grid-template-columns: repeat(2,1fr); }
+      .pillars { grid-template-columns: 1fr; }
+      .hero { padding: 60px 20px 40px; }
+      .section, .war-room, .stats-row { padding-left: 20px; padding-right: 20px; }
     }
-    .header h1 { font-size: 1.4rem; font-weight: 700; color: #60a5fa; letter-spacing: -0.02em; }
-    .header .subtitle { font-size: 0.78rem; color: #6b7280; margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
-    .domain-selector {
-      background: #1f2937; padding: 8px 14px; border-radius: 8px;
-      display: flex; align-items: center; gap: 10px; border: 1px solid #374151;
-    }
-    .domain-selector label { font-size: 0.7rem; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing:.05em; }
-    .domain-selector select {
-      background: #111827; color: #60a5fa; border: 1px solid #374151;
-      padding: 5px 10px; border-radius: 6px; outline: none; cursor: pointer;
-      font-size:0.82rem; font-weight: 600; transition: border-color 0.2s;
-    }
-    .domain-selector select:hover { border-color: #60a5fa; }
-    .status-bar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
-    .badge {
-      display: flex; align-items: center; padding: 5px 11px; border-radius: 6px;
-      font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; gap: 5px;
-    }
-    .badge-ok   { background: rgba(16,185,129,.1);  color: #34d399; border: 1px solid rgba(16,185,129,.2); }
-    .badge-warn { background: rgba(245,158,11,.1);  color: #fbbf24; border: 1px solid rgba(245,158,11,.2); }
-    .badge-bad  { background: rgba(239,68,68,.1);   color: #f87171; border: 1px solid rgba(239,68,68,.2); }
-    .badge-info { background: rgba(59,130,246,.1);  color: #60a5fa; border: 1px solid rgba(59,130,246,.2); }
-    .badge-purple{ background: rgba(139,92,246,.1); color: #a78bfa; border: 1px solid rgba(139,92,246,.2); }
-    .controls {
-      display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 18px;
-      background: #111827; padding: 14px; border-radius: 8px; border: 1px solid #1f2937;
-    }
-    .control-group { display: flex; flex-direction: column; gap: 5px; }
-    .control-group label { font-size: 0.7rem; color: #9ca3af; font-weight: 600; text-transform:uppercase; letter-spacing:.04em; }
-    select, input[type=range] {
-      background: #1f2937; color: #f3f4f6; border: 1px solid #374151;
-      padding: 7px 11px; border-radius: 6px; font-size: 0.82rem; outline: none;
-    }
-    input[type=range] { padding: 0; accent-color: #3b82f6; height: 5px; margin-top: 9px; }
-    .btn {
-      padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer;
-      font-size: 0.82rem; font-weight: 700; display: flex; align-items: center;
-      gap: 5px; transition: all 0.15s; letter-spacing:.02em;
-    }
-    .btn-step   { background: #2563eb; color: #fff; } .btn-step:hover   { background: #3b82f6; transform:translateY(-1px); }
-    .btn-reset  { background: #374151; color: #f3f4f6; } .btn-reset:hover  { background: #4b5563; }
-    .btn-clear  { background: rgba(239,68,68,.15); color: #f87171; } .btn-clear:hover { background: rgba(239,68,68,.3); }
-    .btn-allow  { background: rgba(16,185,129,.2); color: #34d399; border:1px solid rgba(16,185,129,.3); }
-    .btn-allow:hover  { background: rgba(16,185,129,.4); }
-    .btn-block  { background: rgba(239,68,68,.2); color: #f87171; border:1px solid rgba(239,68,68,.3); }
-    .btn-block:hover  { background: rgba(239,68,68,.4); }
-    .btn-shadow { background: rgba(245,158,11,.2); color: #fbbf24; border:1px solid rgba(245,158,11,.3); }
-    .btn-shadow:hover { background: rgba(245,158,11,.4); }
-    .grid { display: grid; grid-template-columns: 3fr 1.5fr; gap: 18px; }
-    .panel {
-      background: #0d1117; border: 1px solid #1f2937; border-radius: 12px;
-      padding: 14px; display: flex; flex-direction: column;
-      box-shadow: 0 4px 12px rgba(0,0,0,.3);
-    }
-    .panel-header {
-      font-size: 0.78rem; font-weight: 700; color: #9ca3af; text-transform: uppercase;
-      letter-spacing: 0.06em; border-bottom: 1px solid #1f2937;
-      padding-bottom: 10px; margin-bottom: 10px;
-      display: flex; justify-content: space-between; align-items: center;
-    }
-    .event-feed { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; padding-right: 4px; }
-    .event-card {
-      background: #161b22; border: 1px solid #30363d; border-left: 3px solid #3b82f6;
-      padding: 10px; border-radius: 6px;
-      font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;
-    }
-    .event-card.attack  { border-left-color: #ef4444; background: rgba(239,68,68,.04); }
-    .event-card.honeypot{ border-left-color: #f59e0b; background: rgba(245,158,11,.04); }
-    .event-card.hitl    { border-left-color: #a78bfa; background: rgba(139,92,246,.06); }
-    pre { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; overflow-x: auto; color: #a5b4fc; }
-    .threat-gauge-container { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px 0; }
-    .circular-chart { display: block; margin: 0 auto; max-width: 110px; max-height: 110px; }
-    .circle-bg { fill: none; stroke: #1f2937; stroke-width: 3.8; }
-    .circle { fill: none; stroke-width: 3.8; stroke-linecap: round; transition: stroke-dasharray 0.35s ease, stroke 0.35s ease; }
-    .percentage { fill: #f3f4f6; font-family: sans-serif; font-size: 0.5em; text-anchor: middle; font-weight: bold; }
-    /* HITL Freeze Overlay */
-    #hitlOverlay {
-      display: none; position: fixed; inset: 0; z-index: 1000;
-      background: rgba(0,0,0,.7); backdrop-filter: blur(4px);
-      justify-content: center; align-items: center;
-    }
-    #hitlOverlay.active { display: flex; }
-    .hitl-card {
-      background: #0d1117; border: 2px solid #a78bfa;
-      border-radius: 16px; padding: 28px 32px; max-width: 520px; width: 95%;
-      box-shadow: 0 0 60px rgba(139,92,246,.4);
-      animation: pulseBorder 2s ease-in-out infinite;
-    }
-    @keyframes pulseBorder {
-      0%,100% { box-shadow: 0 0 40px rgba(139,92,246,.3); }
-      50%      { box-shadow: 0 0 80px rgba(139,92,246,.6); }
-    }
-    .hitl-card h2 { color: #a78bfa; font-size: 1rem; margin-bottom: 6px; letter-spacing:-.01em; }
-    .hitl-card .hitl-label { font-family: 'JetBrains Mono', monospace; color: #9ca3af; font-size:.72rem; margin-bottom:16px; }
-    .hitl-field { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:10px 14px; margin-bottom:10px; }
-    .hitl-field label { font-size:.68rem; color:#6b7280; text-transform:uppercase; letter-spacing:.06em; display:block; margin-bottom:3px; }
-    .hitl-field .val { font-size:.82rem; color:#e5e7eb; font-weight:600; }
-    .hitl-field .tags { font-family:'JetBrains Mono',monospace; font-size:.72rem; color:#fbbf24; }
-    .hitl-field .cf { font-size:.78rem; color:#f87171; font-style:italic; }
-    .hitl-score-bar { display:flex; align-items:center; gap:12px; margin:14px 0; }
-    .hitl-score-bar .score { font-size:1.8rem; font-weight:800; color:#fbbf24; }
-    .hitl-score-bar .zone { font-size:.72rem; color:#9ca3af; }
-    .wa-preview {
-      background: #075e54; border-radius: 10px; padding: 14px;
-      margin: 14px 0; font-family: 'JetBrains Mono', monospace; font-size: .72rem;
-      color: #d1fae5; white-space: pre-wrap; line-height: 1.6;
-      box-shadow: inset 0 2px 8px rgba(0,0,0,.3);
-    }
-    .wa-preview .wa-header { color: #a7f3d0; font-weight: 700; font-size:.78rem; margin-bottom:6px; }
-    .hitl-actions { display: flex; gap: 10px; margin-top: 18px; }
-    .hitl-actions .btn { flex: 1; justify-content: center; padding: 10px; font-size:.82rem; }
-    /* Replay buffer counter */
-    .replay-counter {
-      display:flex; align-items:center; gap:6px; background:rgba(139,92,246,.1);
-      border:1px solid rgba(139,92,246,.25); border-radius:6px; padding:4px 10px;
-      font-size:.72rem; color:#a78bfa; font-weight:700;
-    }
-    ::-webkit-scrollbar { width: 5px; height: 5px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
   </style>
 </head>
 <body>
-  <!-- HITL Freeze Overlay -->
-  <div id="hitlOverlay">
-    <div class="hitl-card">
-      <h2>⚠️ GUARDIAN — Awaiting Human Decision</h2>
-      <div class="hitl-label">Context ID: <span id="hitlCtxId">—</span></div>
 
-      <div class="hitl-field">
-        <label>Pending Tool Call</label>
-        <div class="val" id="hitlTool">—</div>
-      </div>
-      <div class="hitl-field">
-        <label>Capability Tags</label>
-        <div class="tags" id="hitlTags">—</div>
-      </div>
+  <!-- Background orbs -->
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
 
-      <div class="hitl-score-bar">
-        <div class="score" id="hitlRiskPct">—%</div>
-        <div class="zone">Risk Score<br><span style="color:#fbbf24">Gray Zone (55%–75%)</span><br>Autonomous decision not safe.</div>
-      </div>
+  <!-- Toast -->
+  <div id="episodeToast">🏁 <strong>Episode Complete</strong><br><span id="toastMsg">New episode started.</span></div>
 
-      <div class="hitl-field">
-        <label>Counterfactual Impact (if ALLOWED)</label>
-        <div class="cf" id="hitlCf">—</div>
-      </div>
-
-      <!-- Simulated WhatsApp message -->
-      <div class="wa-preview">
-        <div class="wa-header">📱 OpenClaw → WhatsApp Business</div>
-        <div id="hitlWaMsg">—</div>
-      </div>
-
-      <div class="hitl-actions">
-        <button class="btn btn-allow"  onclick="submitHITL('allow')">✅ [1] ALLOW</button>
-        <button class="btn btn-shadow" onclick="submitHITL('shadow')">🔀 [3] SHADOW</button>
-        <button class="btn btn-block"  onclick="submitHITL('block')">🚫 [2] BLOCK</button>
-      </div>
+  <!-- NAV -->
+  <nav>
+    <div class="nav-logo">
+      <div class="shield">🛡</div>
+      GUARDIAN
+      <span class="nav-pill">OpenEnv v0.2</span>
     </div>
+    <div class="nav-links">
+      <a href="#about" class="active">About</a>
+      <a href="#war-room">Live Demo</a>
+      <a href="/docs" target="_blank">API Docs</a>
+    </div>
+    <div style="font-size:0.78rem;color:var(--muted);display:flex;align-items:center">
+      <span class="pulse-dot"></span> <span id="wsStatus">Connecting…</span>
+    </div>
+  </nav>
+
+  <!-- ══ HERO ══ -->
+  <div id="about">
+  <section class="hero">
+    <div class="hero-tag">🏆 Meta OpenEnv Hackathon — AI Security Track</div>
+    <h1>AI agents will<br>act rogue.<br><span class="grad">We built the safety net.</span></h1>
+    <p class="hero-sub">
+      GUARDIAN is an LLM-based security overseer trained with GRPO to watch enterprise AI agents in real time — detecting 11 attack patterns from prompt injection to rogue AI, and intercepting them through an MCP gateway before production is compromised.
+    </p>
+    <div class="hero-cta">
+      <button class="btn btn-primary" onclick="document.getElementById('war-room').scrollIntoView({behavior:'smooth'})">▶ Launch Live Demo</button>
+      <a href="/docs" target="_blank"><button class="btn btn-ghost">View API Spec →</button></a>
+    </div>
+  </section>
+
+  <!-- STATS -->
+  <div class="stats-row">
+    <div class="stat-card"><div class="stat-num stat-blue">11</div><div class="stat-label">Attack types covered</div></div>
+    <div class="stat-card"><div class="stat-num stat-green">16</div><div class="stat-label">Reward signal components</div></div>
+    <div class="stat-card"><div class="stat-num stat-amber">7B</div><div class="stat-label">Qwen2.5 Guardian model</div></div>
+    <div class="stat-card"><div class="stat-num stat-purple">&lt;1s</div><div class="stat-label">Decision latency (T4 GPU)</div></div>
   </div>
 
-  <div class="header">
-    <div>
-      <h1>🛡️ GUARDIAN Fleet — SOC War Room</h1>
-      <div class="subtitle">WS: <span id="wsUrl"></span> &nbsp;|&nbsp; <span id="connStatus" style="color:#34d399">Connecting...</span></div>
-    </div>
-    <div class="domain-selector">
-      <label>Target Domain</label>
-      <select id="domainSelect" onchange="switchDomain()">
-        <option value="enterprise">🏢 Enterprise HR/Finance  (Training)</option>
-        <option value="finops">📈 Financial Algorithmic Trading  (Zero-Shot)</option>
-        <option value="corpgov">🏛️ Multi-Agent Corp Governance  (Zero-Shot)</option>
-      </select>
-    </div>
-  </div>
-
-  <div class="status-bar" id="statusRow">
-    <div class="badge badge-info"   id="badgeStep">Step 0</div>
-    <div class="badge badge-ok"     id="badgeProd">✅ DB Intact</div>
-    <div class="badge badge-ok"     id="badgeFork">No Fork</div>
-    <div class="badge badge-ok"     id="badgeAtk">System Clean</div>
-    <div class="badge badge-info"   id="badgeReward">Reward: 0.000</div>
-    <div class="replay-counter" id="replayCounter" title="Human decisions logged for next GRPO training run">🧠 Replay Buffer: 0</div>
-  </div>
-
-  <div class="controls">
-    <div class="control-group">
-      <label>Intervention</label>
-      <select id="intervention">
-        <option>allow</option><option>shadow</option><option>rewrite</option>
-        <option>interrogate</option><option>reduce_privs</option>
-        <option>quarantine_tool</option><option>emergency_fork</option>
-        <option>quarantine_agent</option>
-      </select>
-    </div>
-    <div class="control-group">
-      <label>Classified Threat</label>
-      <select id="attack_type">
-        <option value="">(None)</option>
-        <option>authority_spoofing</option><option>prompt_injection</option>
-        <option>approval_bypass</option><option>data_exfiltration</option>
-        <option>confused_deputy</option><option>schema_drift_exploit</option>
-        <option>rogue_internal_ai</option>
-      </select>
-    </div>
-    <div class="control-group" style="flex:1; min-width:200px;">
-      <label>Risk Score: <span id="riskVal" style="color:#60a5fa">0.30</span>
-        <span id="zoneLabel" style="font-size:.68rem; color:#9ca3af; margin-left:6px;"></span>
-      </label>
-      <input type="range" id="riskSlider" min="0" max="1" step="0.05" value="0.3"
-             oninput="onRiskChange(this.value)">
-    </div>
-    <div class="control-group" style="flex-direction:row; align-items:flex-end; gap:8px;">
-      <button class="btn btn-reset" onclick="doReset()">↻ Reset</button>
-      <button class="btn btn-step"  onclick="doStep()">▶ Execute Step</button>
-      <button class="btn btn-clear" onclick="clearLog()">⌫ Clear</button>
-      <button class="btn" style="background:rgba(139,92,246,.2);color:#a78bfa;border:1px solid rgba(139,92,246,.3)" onclick="simulateHITL()">⚠️ Demo HITL</button>
-    </div>
-  </div>
-
-  <div class="grid">
-    <div class="panel">
-      <div class="panel-header">
-        <span>📡 Telemetry & MCP Intercept Feed</span>
-        <span style="color:#3b82f6" id="toolCount">0 Events</span>
+  <!-- PILLARS -->
+  <section class="section">
+    <div class="section-label">Why GUARDIAN</div>
+    <h2 class="section-title">The problem nobody solved yet.</h2>
+    <p class="section-sub">Existing AI guardrails only add a static blocklist. GUARDIAN is a trained model that learns which actions are dangerous in context — and gets smarter every episode.</p>
+    <div class="pillars">
+      <div class="pillar">
+        <div class="pillar-icon pi-red">⚡</div>
+        <h3>Real-Time Interception</h3>
+        <p>Every worker tool call is routed through an MCP-compliant gateway. Guardian decides in &lt;900ms: allow, shadow, quarantine, or emergency fork.</p>
       </div>
-      <div class="event-feed" id="log">
-        <div style="color:#6b7280;font-size:.78rem;text-align:center;margin-top:16px;">Awaiting enterprise telemetry hook...</div>
+      <div class="pillar">
+        <div class="pillar-icon pi-blue">🧠</div>
+        <h3>Learns from Every Episode</h3>
+        <p>GRPO training + self-distillation guarantees positive learning signal even on rare attack types. Guardian improves measurably across 120 training episodes.</p>
+      </div>
+      <div class="pillar">
+        <div class="pillar-icon pi-purple">👤</div>
+        <h3>Human in the Loop</h3>
+        <p>Ambiguous grey-zone events (risk 0.45–0.75) escalate to a human decision via Telegram. The human's choice is replayed into the next GRPO training run.</p>
+      </div>
+      <div class="pillar">
+        <div class="pillar-icon pi-green">🔗</div>
+        <h3>MCP-Native Architecture</h3>
+        <p>GUARDIAN acts as a standards-compliant MCP Security Gateway. It mediates all tool calls with semantic capability tags — enterprise-grade, not a demo hack.</p>
+      </div>
+      <div class="pillar">
+        <div class="pillar-icon pi-amber">📊</div>
+        <h3>16-Component Reward</h3>
+        <p>Production safety, detection lag, reasoning quality, anti-gaming calibration. The reward is robust — the model can't exploit a single signal to farm points.</p>
+      </div>
+      <div class="pillar">
+        <div class="pillar-icon pi-cyan">🕵️</div>
+        <h3>Honeypot &amp; Taint Tracking</h3>
+        <p>Suspected attacker traffic is silently routed to a honeypot environment. Multi-step taint propagation tracks financial exposure across all injected actions.</p>
       </div>
     </div>
+    <div class="chip-row">
+      <span class="chip chip-red">authority_spoofing</span>
+      <span class="chip chip-red">prompt_injection</span>
+      <span class="chip chip-red">rogue_internal_ai</span>
+      <span class="chip chip-amber">approval_bypass</span>
+      <span class="chip chip-amber">confused_deputy</span>
+      <span class="chip chip-amber">delayed_exfiltration</span>
+      <span class="chip chip-purple">salami_slicing</span>
+      <span class="chip chip-purple">schema_drift_exploit</span>
+      <span class="chip chip-purple">social_engineering</span>
+      <span class="chip chip-amber">data_exfiltration</span>
+      <span class="chip chip-amber">approval_laundering</span>
+    </div>
+  </section>
+  </div>
 
-    <div style="display:flex; flex-direction:column; gap:18px;">
-      <div class="panel">
-        <div class="panel-header"><span>⚠️ Live Threat Assessment</span></div>
-        <div class="threat-gauge-container">
-          <svg viewBox="0 0 36 36" class="circular-chart">
-            <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
-            <path class="circle" id="riskGauge" stroke="#10b981" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
-            <text x="18" y="20.35" class="percentage" id="riskText">0%</text>
-          </svg>
-          <div style="margin-top:10px; font-size:.72rem; color:#9ca3af;" id="threatLabel">SYSTEM NORMAL</div>
+  <hr class="divider">
+
+  <!-- ══ WAR ROOM ══ -->
+  <div id="war-room" class="war-room">
+    <div class="war-room-header">
+      <div class="war-room-title">
+        <h2>⚔️ SOC War Room — Live Demo</h2>
+        <span class="gateway-badge"><span class="pulse-dot"></span>MCP Gateway Active</span>
+      </div>
+      <div id="domainSel" style="display:flex;align-items:center;gap:10px">
+        <label class="ctrl-label" style="margin:0">Domain</label>
+        <select class="ctrl-sel" id="domainDropdown" style="width:auto" onchange="setDomain(this.value)">
+          <option value="enterprise">🏢 Enterprise HR / Finance</option>
+          <option value="finops">💳 FinOps (Trading)</option>
+          <option value="healthcare">🏥 Healthcare</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Status bar -->
+    <div class="sb-row" style="margin-bottom:16px" id="statusBar">
+      <span class="sb sb-blue" id="sbStep"><span class="sb-dot"></span>STEP 0</span>
+      <span class="sb sb-green" id="sbDb"><span class="sb-dot"></span>DB INTACT</span>
+      <span class="sb sb-green" id="sbFork"><span class="sb-dot"></span>NO FORK</span>
+      <span class="sb sb-green" id="sbProd"><span class="sb-dot"></span>SYSTEM CLEAN</span>
+      <span class="sb sb-purple" id="sbReward"><span class="sb-dot"></span>REWARD: 0.000</span>
+    </div>
+
+    <div class="wr-grid">
+      <!-- LEFT -->
+      <div class="wr-left">
+
+        <!-- Controls -->
+        <div class="card">
+          <div class="card-hd"><span class="card-hd-title">Guardian Decision Controls</span></div>
+          <div class="card-body">
+            <div class="ctrl-row">
+              <div>
+                <label class="ctrl-label">Intervention</label>
+                <select class="ctrl-sel" id="ivSel">
+                  <option value="allow">allow</option>
+                  <option value="shadow">shadow (honeypot)</option>
+                  <option value="rewrite">rewrite</option>
+                  <option value="interrogate">interrogate</option>
+                  <option value="reduce_privs">reduce_privs</option>
+                  <option value="require_justification">require_justification</option>
+                  <option value="quarantine_tool">quarantine_tool</option>
+                  <option value="quarantine_agent">quarantine_agent 🚨</option>
+                  <option value="rollback_k">rollback_k</option>
+                  <option value="emergency_fork">emergency_fork 🔴</option>
+                  <option value="canary_inject">canary_inject</option>
+                  <option value="escalate_human">escalate_human</option>
+                </select>
+              </div>
+              <div>
+                <label class="ctrl-label">Classified Threat</label>
+                <select class="ctrl-sel" id="attackSel">
+                  <option value="">— None (clean) —</option>
+                  <option value="authority_spoofing">authority_spoofing</option>
+                  <option value="prompt_injection">prompt_injection</option>
+                  <option value="approval_bypass">approval_bypass</option>
+                  <option value="data_exfiltration">data_exfiltration</option>
+                  <option value="confused_deputy">confused_deputy</option>
+                  <option value="approval_laundering">approval_laundering</option>
+                  <option value="salami_slicing">salami_slicing</option>
+                  <option value="schema_drift_exploit">schema_drift_exploit</option>
+                  <option value="rogue_internal_ai">rogue_internal_ai 🚨</option>
+                  <option value="delayed_exfiltration">delayed_exfiltration</option>
+                  <option value="social_engineering">social_engineering</option>
+                </select>
+              </div>
+            </div>
+            <div class="risk-row">
+              <div class="risk-display">
+                <label class="ctrl-label" style="margin:0">Assessed Risk Score</label>
+                <span class="risk-val" id="riskDisplay">0.10</span>
+              </div>
+              <input type="range" id="riskSlider" min="0" max="100" value="10" oninput="document.getElementById('riskDisplay').textContent=(this.value/100).toFixed(2)">
+            </div>
+            <div class="btn-row">
+              <button class="btn-sm btn-reset" onclick="doReset()">↺ Reset</button>
+              <button class="btn-sm btn-run" onclick="doStep()">▶ Execute Step</button>
+              <button class="btn-sm btn-clear" onclick="clearFeed()">✕ Clear</button>
+            </div>
+          </div>
         </div>
+
+        <!-- MCP Feed -->
+        <div class="card" style="flex:1">
+          <div class="card-hd">
+            <span class="card-hd-title">⚡ Telemetry &amp; MCP Intercept Feed</span>
+            <span id="feedCount" style="font-size:0.72rem;color:var(--blue);font-weight:700;">0 EVENTS</span>
+          </div>
+          <div class="card-body" style="padding:12px">
+            <div class="feed" id="feed"><div class="feed-empty">Awaiting enterprise telemetry hook…</div></div>
+          </div>
+        </div>
+
       </div>
 
-      <div class="panel" style="flex:1;">
-        <div class="panel-header"><span>🛡️ Last Observation</span></div>
-        <div style="overflow-y:auto; max-height:180px;">
-          <pre id="obsJson">{}</pre>
+      <!-- RIGHT -->
+      <div class="wr-right">
+
+        <!-- Risk Gauge -->
+        <div class="card">
+          <div class="card-hd"><span class="card-hd-title">🔴 Live Threat Assessment</span></div>
+          <div class="card-body">
+            <div class="gauge-wrap">
+              <svg class="gauge-svg" width="140" height="140" viewBox="0 0 140 140">
+                <circle class="gauge-track" cx="70" cy="70" r="54" />
+                <circle class="gauge-fill" id="gaugeFill" cx="70" cy="70" r="54"
+                  stroke="#3b82f6"
+                  stroke-dasharray="339.3"
+                  stroke-dashoffset="339.3" />
+              </svg>
+              <div class="gauge-center">
+                <div class="gauge-pct" id="gaugePct" style="color:var(--blue)">0%</div>
+                <div class="gauge-lbl" id="gaugeLbl">SYSTEM NORMAL</div>
+              </div>
+            </div>
+          </div>
         </div>
+
+        <!-- Cumulative Reward -->
+        <div class="card">
+          <div class="card-hd"><span class="card-hd-title">📈 Episode Reward</span></div>
+          <div class="card-body">
+            <div class="reward-row">
+              <div><div class="reward-val" id="rewardVal">0.000</div><div class="reward-label">Cumulative reward</div></div>
+              <div style="text-align:right"><div style="font-size:1.1rem;font-weight:700;color:var(--green)" id="episodeNum">#—</div><div class="reward-label">Episode</div></div>
+            </div>
+            <div class="mini-bars" id="miniBars"></div>
+          </div>
+        </div>
+
+        <!-- Last Observation -->
+        <div class="card" style="flex:1">
+          <div class="card-hd"><span class="card-hd-title">🔵 Last Observation State</span></div>
+          <div class="card-body">
+            <pre class="obs-pre" id="obsPanel">{}</pre>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
 
   <script>
-    let ws, currentDomain = 'enterprise', pendingCtxId = null, replayCount = 0;
-    const wsUrl = (location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/ws';
-    document.getElementById('wsUrl').textContent = wsUrl;
+    const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+    let ws, cumReward = 0, feedCount = 0, rewardHistory = [], stepNum = 0;
+    const CIRCUMFERENCE = 339.3;
 
+    // ── WebSocket ────────────────────────────────────────────────────────────
     function connect() {
-      ws = new WebSocket(wsUrl);
-      ws.onopen  = ()=>{ setConn(true); addLog('System','Connected to MCP Gateway.',null,''); };
-      ws.onclose = ()=>{ setConn(false); setTimeout(connect, 3000); };
-      ws.onerror = ()=>{ addLog('Error','WebSocket dropped.',null,'attack'); };
+      ws = new WebSocket(WS_URL);
+      ws.onopen = () => { setWsStatus('Gateway Active', true); doReset(); };
+      ws.onclose = () => { setWsStatus('Reconnecting…', false); setTimeout(connect, 3000); };
+      ws.onerror = () => { setWsStatus('Connection Error', false); };
       ws.onmessage = e => handleMsg(JSON.parse(e.data));
     }
-    function setConn(ok){
-      const el=document.getElementById('connStatus');
-      el.textContent=ok?'🟢 Gateway Active':'🔴 Lost'; el.style.color=ok?'#34d399':'#f87171';
-    }
-    function send(m){ if(ws&&ws.readyState===1) ws.send(JSON.stringify(m)); }
-    function doReset(){ send({type:'reset'}); clearLog(); addLog('System','Environment reset.'); }
-    function doStep(){
-      const risk = parseFloat(document.getElementById('riskSlider').value);
-      // Check if risk is in gray zone — show HITL overlay for demo
-      if(risk >= 0.55 && risk <= 0.75) {
-        const tool = document.getElementById('attack_type').value || 'write_db';
-        triggerHITLOverlay(risk, tool);
-        return;
-      }
-      send({type:'step', action:{
-        risk_score: risk,
-        intervention: document.getElementById('intervention').value,
-        attack_type: document.getElementById('attack_type').value||null,
-        rollback_k: 2,
-        reasoning: 'Manual SOC override'
-      }});
-    }
-    function switchDomain(){
-      const dom = document.getElementById('domainSelect').value;
-      currentDomain = dom;
-      send({type:'set_domain', domain:dom});
-      clearLog();
-      addLog('🌐 Domain Switch', 'Hot-swapped environment context → ' + dom.toUpperCase() + ' (zero-shot)', null, 'honeypot');
-    }
-    function clearLog(){ document.getElementById('log').innerHTML=''; document.getElementById('toolCount').textContent='0 Events'; }
-    function onRiskChange(v){
-      document.getElementById('riskVal').textContent = parseFloat(v).toFixed(2);
-      const pct = Math.round(v*100);
-      const zl = document.getElementById('zoneLabel');
-      if(pct>=55&&pct<=75){ zl.textContent='⚠️ GRAY ZONE — HITL'; zl.style.color='#fbbf24'; }
-      else if(pct>75){ zl.textContent='🚨 AUTO-BLOCK'; zl.style.color='#f87171'; }
-      else { zl.textContent='✅ AUTO-ALLOW'; zl.style.color='#34d399'; }
-    }
-    function handleMsg(d){
-      if(d.type==='step_result'){
-        try{
-          const log = JSON.parse(d.observation.action_log_json);
-          if(log.length>0){
-            const last=log[log.length-1];
-            const style = d.observation.attack_active?'attack':(d.observation.fork_triggered?'honeypot':'');
-            addLog(last.tool||'sys_call', JSON.stringify(last.params||{}), d.reward, style);
-            if(d.observation.risk_history&&d.observation.risk_history.length>0)
-              updateGauge(d.observation.risk_history[d.observation.risk_history.length-1]);
-          }
-        }catch(e){}
-      } else if(d.type==='error'){
-        addLog('Error', d.message, null, 'attack');
-      }
-      const obs=d.observation;
-      if(obs){
-        document.getElementById('obsJson').textContent=JSON.stringify(obs,null,2);
-        setB('badgeStep','Step '+obs.current_step,'badge-info');
-        setB('badgeProd',obs.production_intact?'✅ DB INTACT':'❌ BREACHED',obs.production_intact?'badge-ok':'badge-bad');
-        setB('badgeFork',obs.fork_triggered?'🔀 HONEYPOT':'NO FORK',obs.fork_triggered?'badge-warn':'badge-ok');
-        setB('badgeAtk',obs.attack_active?'⚠️ ATTACK':'CLEAN',obs.attack_active?'badge-bad':'badge-ok');
-      }
-      if(d.reward!==undefined) setB('badgeReward','R: '+Number(d.reward).toFixed(4),'badge-info');
-    }
-    function addLog(title, detail, reward, styleClass=''){
-      const feed=document.getElementById('log');
-      const time=new Date().toISOString().substring(11,23);
-      const div=document.createElement('div');
-      div.className='event-card '+(styleClass||'');
-      div.innerHTML=`
-        <div style="display:flex;justify-content:space-between;color:#9ca3af; margin-bottom:4px;">
-          <span style="font-weight:700;color:#e5e7eb">${title}</span>
-          <span style="color:#6b7280">${time}${reward!=null?' | R:'+Number(reward).toFixed(3):''}</span>
-        </div>
-        <div style="color:#60a5fa;word-break:break-all">${detail}</div>
-      `;
-      feed.prepend(div);
-      document.getElementById('toolCount').textContent=feed.children.length+' Events';
-    }
-    function setB(id,txt,cls){ const b=document.getElementById(id); b.textContent=txt; b.className='badge '+cls; }
-    function updateGauge(val){
-      const pct=Math.round(val*100);
-      document.getElementById('riskText').textContent=pct+'%';
-      let color='#10b981',label='SYSTEM NORMAL';
-      if(pct>55&&pct<=75){ color='#a78bfa'; label='⚠️ GRAY ZONE — AWAITING HUMAN'; }
-      else if(pct>40){ color='#f59e0b'; label='ELEVATED RISK'; }
-      if(pct>75){ color='#ef4444'; label='CRITICAL THREAT'; }
-      const path=document.getElementById('riskGauge');
-      path.setAttribute('stroke-dasharray',`${pct}, 100`);
-      path.setAttribute('stroke',color);
-      const lbl=document.getElementById('threatLabel');
-      lbl.textContent=label; lbl.style.color=color;
+
+    function setWsStatus(txt, ok) {
+      const el = document.getElementById('wsStatus');
+      el.textContent = txt;
+      el.style.color = ok ? 'var(--green)' : '#f87171';
     }
 
-    /* ── HITL Overlay ─────────────────────────────── */
-    function triggerHITLOverlay(risk, tool){
-      pendingCtxId = 'demo-' + Math.random().toString(36).substr(2,8);
-      const pct = Math.round(risk*100);
-      const counterfactuals = {
-        'override_margin_limits': 'Margin reqs zeroed — uncollateralized positions ~$50M accumulate.',
-        'modify_iam_policy': 'Rogue agent gains persistent admin privileges across all enterprise systems.',
-        'data_exfiltration': 'Full employee PII (14K records) exfiltrated to external endpoint.',
-        'modify_compliance_threshold': 'All future board approvals bypass review automatically.',
-        'write_db': 'Production DB mutated without rollback capability — data integrity compromised.',
-      };
-      const cf = counterfactuals[tool] || 'System state permanently corrupted with high blast radius.';
-      const tags = risk > 0.6 ? '[STATE_MOD=True|PRIV_ESC=True|EXT_COMM=False|FINANCIAL=Critical]'
-                               : '[STATE_MOD=True|PRIV_ESC=False|EXT_COMM=True|FINANCIAL=High]';
-      const waMsg = `🚨 *GUARDIAN Escalation — Decision Required*\n${'━'.repeat(30)}\nDomain: ${currentDomain.toUpperCase()}\nTool: \`${tool}()\`\nCapability: \`${tags}\`\nRisk Score: ${pct}% _(Gray Zone — Ambiguous)_\n\nCounterfactual: _${cf}_\n${'━'.repeat(30)}\nReply:\n[1] ALLOW  [2] BLOCK  [3] SHADOW\n\nContext: \`${pendingCtxId}\``;
-      document.getElementById('hitlCtxId').textContent = pendingCtxId;
-      document.getElementById('hitlTool').textContent = tool + '()';
-      document.getElementById('hitlTags').textContent = tags;
-      document.getElementById('hitlRiskPct').textContent = pct + '%';
-      document.getElementById('hitlCf').textContent = cf;
-      document.getElementById('hitlWaMsg').textContent = waMsg;
-      document.getElementById('hitlOverlay').classList.add('active');
-      updateGauge(risk);
-      addLog('⚠️ HITL Escalation', `Gray-zone risk (${pct}%) — execution FROZEN. Awaiting human decision.`, null, 'hitl');
-      
-      // 📡 PING THE BACKEND -> TRIGGERS n8n WEBHOOK OVER TELEGRAM
-      // Use the real server-generated context_id so /hitl/decision can resolve it
-      fetch('/hitl/escalate', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          risk_score: risk,
-          tool_name: tool,
-          counterfactual: cf,          
-          tool_arguments: {}, 
-          domain: currentDomain,
-          classified_attack: document.getElementById('attack_type').value || 'ambiguous_behavior',
-          capability_tags: tags
-        })
-      }).then(r => r.json()).then(data => {
-        if (data.context_id) {
-          pendingCtxId = data.context_id;  // ✅ Override with real server UUID
-          document.getElementById('hitlCtxId').textContent = pendingCtxId;
-        }
-      }).catch(e => console.error(e));
-    }
-    function simulateHITL(){
-      const tools = ['override_margin_limits','modify_iam_policy','data_exfiltration','write_db'];
-      const tool = tools[Math.floor(Math.random()*tools.length)];
-      triggerHITLOverlay(0.62 + Math.random()*0.12, tool);
-    }
-    async function submitHITL(decision){
-      document.getElementById('hitlOverlay').classList.remove('active');
-      const labels = {allow:'✅ ALLOWED (Production)', block:'🚫 BLOCKED (Quarantined)', shadow:'🔀 SHADOWED (→ Honeypot)'};
-      addLog('🧠 Human Decision: ' + decision.toUpperCase(), `Context ${pendingCtxId} resolved — ${labels[decision]}`, null, decision==='allow'?'':'honeypot');
-      // POST to real endpoint
-      try {
-        const r = await fetch('/hitl/decision', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({context_id: pendingCtxId, decision})
-        });
-        const data = await r.json();
-        replayCount = data.replay_buffer_total || replayCount + 1;
-        document.getElementById('replayCounter').textContent = '🧠 Replay Buffer: ' + replayCount;
-        addLog('📝 Replay Buffer Updated', `Ground-truth entry logged. GRPO training queue: ${replayCount} examples.`, null, 'hitl');
-      } catch(e) {
-        replayCount++;
-        document.getElementById('replayCounter').textContent = '🧠 Replay Buffer: ' + replayCount;
+    function handleMsg(d) {
+      if (d.type === 'reset_result' || d.type === 'episode_done') {
+        if (d.type === 'episode_done') showToast('🏁 Episode done — auto-reset!', d.episode_id);
+        cumReward = 0; stepNum = 0; rewardHistory = [];
+        updateStatus(d.state || {}, 0);
+        log('sys', `Episode reset — id: ${(d.state||{}).episode_id || '—'}`);
+        updateObs(d.observation || {});
       }
-      // Now send the actual step with the human-decided intervention
-      const ivMap = {allow:'allow', block:'quarantine_agent', shadow:'shadow'};
-      send({type:'step', action:{
-        risk_score: parseFloat(document.getElementById('riskSlider').value),
-        intervention: ivMap[decision],
-        attack_type: document.getElementById('attack_type').value||null,
-        rollback_k: 2,
-        reasoning: `Human HITL decision: ${decision} (context: ${pendingCtxId})`
-      }});
-      pendingCtxId = null;
+      if (d.type === 'step_result') {
+        stepNum++;
+        const r = d.reward || 0;
+        cumReward += r;
+        rewardHistory.push(r);
+        updateStatus(d.state || {}, cumReward);
+        updateGauge(d.observation);
+        updateObs(d.observation || {});
+        updateBars();
+        const iv = (d.state||{}).last_intervention || '—';
+        const atk = (d.observation||{}).classified_attack || 'clean';
+        const prod = (d.state||{}).production_intact !== false;
+        const cls = r > 0.5 ? 'f-ok' : r > 0 ? 'f-warn' : 'f-bad';
+        log(cls === 'f-ok' ? 'ok' : cls === 'f-warn' ? 'warn' : 'bad',
+          `step=${stepNum} iv=${iv} threat=${atk} reward=${r.toFixed(4)} prod=${prod ? '✓' : '✗'}`);
+      }
+      if (d.type === 'error') log('bad', `Error: ${d.message}`);
     }
+
+    // ── Actions ──────────────────────────────────────────────────────────────
+    function doReset() {
+      if (!ws || ws.readyState !== 1) return;
+      ws.send(JSON.stringify({ type: 'reset' }));
+    }
+    function doStep() {
+      if (!ws || ws.readyState !== 1) return;
+      const action = {
+        intervention:    document.getElementById('ivSel').value,
+        attack_type:     document.getElementById('attackSel').value || null,
+        risk_score:      parseFloat(document.getElementById('riskSlider').value) / 100,
+        reasoning:       'Manual SOC decision via War Room UI',
+      };
+      ws.send(JSON.stringify({ type: 'step', action }));
+    }
+    function setDomain(d) {
+      if (!ws || ws.readyState !== 1) return;
+      ws.send(JSON.stringify({ type: 'set_domain', domain: d }));
+      log('sys', `Domain switched → ${d}`);
+    }
+    function clearFeed() {
+      document.getElementById('feed').innerHTML = '<div class="feed-empty">Feed cleared.</div>';
+      feedCount = 0; document.getElementById('feedCount').textContent = '0 EVENTS';
+    }
+
+    // ── UI Helpers ────────────────────────────────────────────────────────────
+    function ts() {
+      const n = new Date();
+      return `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}:${String(n.getSeconds()).padStart(2,'0')}`;
+    }
+    function log(type, msg) {
+      const feed = document.getElementById('feed');
+      if (feed.querySelector('.feed-empty')) feed.innerHTML = '';
+      feedCount++;
+      document.getElementById('feedCount').textContent = feedCount + ' EVENTS';
+      const cls = {ok:'f-ok',bad:'f-bad',warn:'f-warn',info:'f-info',sys:'f-sys'}[type] || 'f-info';
+      const line = document.createElement('div');
+      line.className = 'feed-line';
+      line.innerHTML = `<span class="f-ts">${ts()}</span><span class="${cls}">${msg}</span>`;
+      feed.appendChild(line);
+      feed.scrollTop = feed.scrollHeight;
+    }
+
+    function updateStatus(state, reward) {
+      const step   = state.step_count || stepNum || 0;
+      const intact = state.production_intact !== false;
+      const fork   = state.fork_triggered === true;
+      const sys    = !fork && intact;
+      const ep     = state.episode_id ? state.episode_id.slice(-8) : '—';
+
+      document.getElementById('sbStep').innerHTML   = `<span class="sb-dot"></span>STEP ${step}`;
+      document.getElementById('sbDb').className     = `sb ${intact ? 'sb-green' : 'sb-red'}`;
+      document.getElementById('sbDb').innerHTML     = `<span class="sb-dot"></span>${intact ? 'DB INTACT' : 'DB BREACHED'}`;
+      document.getElementById('sbFork').className   = `sb ${fork ? 'sb-red' : 'sb-green'}`;
+      document.getElementById('sbFork').innerHTML   = `<span class="sb-dot"></span>${fork ? 'FORK TRIGGERED' : 'NO FORK'}`;
+      document.getElementById('sbProd').className   = `sb ${sys ? 'sb-green' : 'sb-red'}`;
+      document.getElementById('sbProd').innerHTML   = `<span class="sb-dot"></span>${sys ? 'SYSTEM CLEAN' : 'PRODUCTION AT RISK'}`;
+      document.getElementById('sbReward').innerHTML = `<span class="sb-dot"></span>REWARD: ${reward.toFixed(3)}`;
+      document.getElementById('rewardVal').textContent = reward.toFixed(4);
+      document.getElementById('episodeNum').textContent = '#' + ep;
+    }
+
+    function updateGauge(obs) {
+      if (!obs) return;
+      const pct = Math.round((obs.risk_score || 0) * 100);
+      const offset = CIRCUMFERENCE - (pct / 100) * CIRCUMFERENCE;
+      const fill = document.getElementById('gaugeFill');
+      const color = pct >= 75 ? '#ef4444' : pct >= 45 ? '#f59e0b' : '#3b82f6';
+      fill.style.strokeDashoffset = offset;
+      fill.style.stroke = color;
+      const lbl = pct >= 75 ? 'HIGH RISK' : pct >= 45 ? 'ELEVATED' : 'SYSTEM NORMAL';
+      document.getElementById('gaugePct').textContent = pct + '%';
+      document.getElementById('gaugePct').style.color = color;
+      document.getElementById('gaugeLbl').textContent = lbl;
+    }
+
+    function updateObs(obs) {
+      if (!obs) return;
+      const clean = {};
+      ['current_step','production_intact','fork_triggered','classified_attack','risk_score','last_worker_tool','episode_id']
+        .forEach(k => { if (obs[k] !== undefined) clean[k] = obs[k]; });
+      document.getElementById('obsPanel').textContent = JSON.stringify(clean, null, 2);
+    }
+
+    function updateBars() {
+      const bars = document.getElementById('miniBars');
+      bars.innerHTML = '';
+      const recent = rewardHistory.slice(-20);
+      const max = Math.max(...recent, 0.01);
+      recent.forEach(r => {
+        const b = document.createElement('div');
+        b.className = 'mini-bar';
+        b.style.height = Math.max(4, Math.round((r / max) * 36)) + 'px';
+        b.style.background = r > 0.5 ? 'var(--green)' : r > 0 ? 'var(--amber)' : '#ef4444';
+        bars.appendChild(b);
+      });
+    }
+
+    function showToast(title, ep) {
+      const t = document.getElementById('episodeToast');
+      document.getElementById('toastMsg').textContent = ep ? 'New episode: ' + ep.slice(-8) : 'Environment reset.';
+      t.querySelector('strong').textContent = title;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 4000);
+    }
+
+    // ── Startup ──────────────────────────────────────────────────────────────
     connect();
-    // Periodically refresh replay counter from server
-    setInterval(async ()=>{
-      try{
-        const r=await fetch('/hitl/replay_stats');
-        const d=await r.json();
-        if(d.total_entries!==undefined){
-          replayCount=d.total_entries;
-          document.getElementById('replayCounter').textContent='🧠 Replay Buffer: '+replayCount;
-        }
-      }catch(e){}
-    }, 10000);
   </script>
 </body>
 </html>"""
@@ -1186,5 +1316,7 @@ def main() -> None:
     uvicorn.run("server.app:app", host=host, port=port, reload=False)
 
 
+
 if __name__ == "__main__":
     main()
+
