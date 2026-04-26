@@ -315,10 +315,26 @@ for ep in range(1, cfg["TOTAL_EPISODES"] + 1):
         except AttributeError:
             pass  # Unsloth 2026.4.8 bug with PeftModel — safe to ignore
 
-        dataset = Dataset.from_list([{
-            "prompt": s["prompt"],
-            "completion": s["completion"],
-        } for s in all_samples[-64:]])  # last 64 samples
+        # Build reward lookup: prompt_prefix -> float reward
+        batch_samples = all_samples[-64:]
+        reward_lookup = {
+            s["prompt"][:120]: float(s.get("reward", 0.4))
+            for s in batch_samples
+        }
+
+        # TRL 5.x / Unsloth 2026 requires reward_funcs — we pass our
+        # pre-computed environment rewards via a prompt-keyed closure.
+        def guardian_reward_fn(completions, prompts=None, **kwargs):
+            rewards = []
+            for i in range(len(completions)):
+                key = (prompts[i][:120] if prompts and i < len(prompts) else "")
+                rewards.append(reward_lookup.get(key, 0.4))
+            return rewards
+
+        # Dataset only needs 'prompt' — trainer generates completions itself
+        dataset = Dataset.from_list([
+            {"prompt": s["prompt"]} for s in batch_samples
+        ])
 
         grpo_cfg = GRPOConfig(
             output_dir             = "outputs/grpo_tmp",
@@ -331,10 +347,11 @@ for ep in range(1, cfg["TOTAL_EPISODES"] + 1):
             max_completion_length  = 200,
         )
         trainer = GRPOTrainer(
-            model    = model,
-            config   = grpo_cfg,
-            train_dataset = dataset,
+            model            = model,
+            config           = grpo_cfg,
+            train_dataset    = dataset,
             processing_class = tokenizer,
+            reward_funcs     = [guardian_reward_fn],
         )
         trainer.train()
         try:
